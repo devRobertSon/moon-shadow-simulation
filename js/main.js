@@ -12,7 +12,7 @@ const SCALE = {
   sunDistance: 2475,       // Sun position on -X axis
   moonDistance: 108,       // Moon orbital radius around Earth
 };
-const AXIAL_TILT = 23.5 * Math.PI / 180;
+const DEFAULT_AXIAL_TILT_DEG = 23.5; // user-adjustable via UI
 
 const TIME_MIN = 0;
 const TIME_MAX = 360;       // simulation minutes (6 hours)
@@ -109,9 +109,9 @@ sunLight.position.copy(sun.position);
 scene.add(sunLight);
 scene.add(new THREE.AmbientLight(0x223355, 0.35));
 
-// Earth + axial tilt group
+// Earth + axial tilt group (tilt is mutable via the UI slider).
 const earthGroup = new THREE.Group();
-earthGroup.rotation.x = AXIAL_TILT;
+earthGroup.rotation.x = DEFAULT_AXIAL_TILT_DEG * Math.PI / 180;
 scene.add(earthGroup);
 
 const earthMesh = new THREE.Mesh(
@@ -590,13 +590,16 @@ function drawMapLabels(w, h) {
 }
 
 // ─── UI ───────────────────────────────────────────────────────────────────
-const $time   = document.getElementById('time-slider');
-const $speed  = document.getElementById('speed-select');
-const $play   = document.getElementById('btn-play');
-const $reset  = document.getElementById('btn-reset');
-const $tRead  = document.getElementById('time-readout');
-const $phase  = document.getElementById('phase-readout');
-const $latLon = document.getElementById('latlon-readout');
+const $time     = document.getElementById('time-slider');
+const $speed    = document.getElementById('speed-select');
+const $play     = document.getElementById('btn-play');
+const $reset    = document.getElementById('btn-reset');
+const $tRead    = document.getElementById('time-readout');
+const $phase    = document.getElementById('phase-readout');
+const $latLon   = document.getElementById('latlon-readout');
+const $tilt     = document.getElementById('tilt-slider');
+const $tiltRead = document.getElementById('tilt-readout');
+const $flipTilt = document.getElementById('btn-flip-tilt');
 
 $time.min = TIME_MIN; $time.max = TIME_MAX;
 
@@ -624,6 +627,32 @@ $time.addEventListener('input', () => {
 $speed.addEventListener('change', () => {
   state.speed = parseFloat($speed.value);
 });
+
+// ─── Axial tilt control ───────────────────────────────────────────────────
+// `input` fires repeatedly during a drag. We update earthGroup.rotation.x
+// every event for live visual feedback, but the full path precompute
+// (a ~700-sample loop) is throttled to once per animation frame.
+let _pathRecomputePending = false;
+function schedulePathRecompute() {
+  if (_pathRecomputePending) return;
+  _pathRecomputePending = true;
+  requestAnimationFrame(() => {
+    _pathRecomputePending = false;
+    precomputePath();
+  });
+}
+
+function setTiltDeg(deg) {
+  const clamped = Math.max(-45, Math.min(45, deg));
+  $tilt.value = clamped;
+  earthGroup.rotation.x = clamped * Math.PI / 180;
+  const sign = clamped > 0 ? '+' : (clamped < 0 ? '−' : '±');
+  $tiltRead.textContent = `${sign}${Math.abs(clamped).toFixed(1)}°`;
+  schedulePathRecompute();
+}
+
+$tilt.addEventListener('input', () => setTiltDeg(parseFloat($tilt.value)));
+$flipTilt.addEventListener('click', () => setTiltDeg(-parseFloat($tilt.value)));
 
 function syncTimeUI() {
   $time.value = state.time;
