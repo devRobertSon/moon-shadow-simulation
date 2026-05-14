@@ -49,8 +49,12 @@ const view3d = document.getElementById('view-3d');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000008);
 
+// Initial viewpoint: looking at Earth from the Sun's side.
+// Sun sits at -X, so the camera is placed on the -X side and aimed at the
+// origin (Earth). With this perspective the Moon, which orbits between Sun
+// and Earth during the eclipse, appears in the foreground.
 const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 8000);
-camera.position.set(45, 22, 95);
+camera.position.set(-200, 55, 85);
 camera.lookAt(0, 0, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
