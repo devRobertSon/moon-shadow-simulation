@@ -431,7 +431,10 @@ function update(realDtSec) {
     penumbraDisc.lookAt(normal.clone().multiplyScalar(2 * SCALE.earthRadius));
     const penScale = Math.min(sg.penumbraR, SCALE.earthRadius * 0.95);
     penumbraDisc.scale.setScalar(Math.max(penScale, 0.001));
-    penumbraDisc.visible = sg.penumbraOnEarth;
+    // Show the penumbra disc only while the umbra is on Earth — the
+    // penumbra-only phase produces a stationary marker at the limb that
+    // confuses more than it informs, so we hide it.
+    penumbraDisc.visible = state.umbraOnEarth;
   } else {
     umbraMarker.visible = false;
     penumbraDisc.visible = false;
@@ -472,7 +475,9 @@ function drawMap2D() {
   // (Penumbra is a circle on the sphere; in equirectangular it appears
   // stretched in longitude near the poles. For typical lat we just use a
   // circle scaled by 1/cos(lat) in x.)
-  if (state.currentLatLon && state.penumbraAngularRad > 0) {
+  // Only draw the penumbra ring while the umbra is on Earth, so the yellow
+  // region appears and vanishes together with the red dot.
+  if (state.umbraOnEarth && state.currentLatLon && state.penumbraAngularRad > 0) {
     drawPenumbraOnMap(w, h, state.currentLatLon.lat, state.currentLatLon.lon,
                       state.penumbraAngularRad);
   }
