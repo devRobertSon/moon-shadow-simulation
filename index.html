@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>일식 시뮬레이션 — Solar Eclipse Simulation</title>
-  <link rel="stylesheet" href="style.css?v=4" />
+  <link rel="stylesheet" href="style.css?v=5" />
   <script type="importmap">
   {
     "imports": {
@@ -67,11 +67,15 @@
       <span>세차(자전축 23.5° 고정)</span>
       <input type="range" id="precession-slider" min="0" max="360" step="1" value="0" />
       <span class="time-readout" id="precession-readout">0°</span>
+      <button class="btn btn-small prec-preset" data-prec="0" title="춘분/추분 방향">0°</button>
+      <button class="btn btn-small prec-preset" data-prec="90" title="동지(북반구 겨울)">90°</button>
+      <button class="btn btn-small prec-preset" data-prec="180" title="반대편 분점">180°</button>
+      <button class="btn btn-small prec-preset" data-prec="270" title="하지(북반구 여름)">270°</button>
     </label>
 
     <div class="phase" id="phase-readout">단계: —</div>
   </footer>
 
-  <script type="module" src="js/main.js?v=4"></script>
+  <script type="module" src="js/main.js?v=5"></script>
 </body>
 </html>

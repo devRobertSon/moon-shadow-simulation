@@ -130,7 +130,11 @@ body {
 
 .btn:hover { background: #2c3360; }
 
-#precession-slider { width: 200px; }
+.btn-small { padding: 4px 8px; font-size: 12px; }
+
+#precession-slider { width: 180px; }
+
+.prec-preset { min-width: 40px; }
 
 .control-group {
   display: flex;

@@ -678,6 +678,9 @@ function setPrecessionDeg(deg) {
   schedulePathRecompute();
 }
 $prec.addEventListener('input', () => setPrecessionDeg(parseFloat($prec.value)));
+document.querySelectorAll('.prec-preset').forEach((btn) => {
+  btn.addEventListener('click', () => setPrecessionDeg(parseFloat(btn.dataset.prec)));
+});
 
 function syncTimeUI() {
   $time.value = state.time;
