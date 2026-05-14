@@ -37,8 +37,13 @@ const state = {
   phase: '대기 중',
   penumbraAngularRad: 0,
   umbraOnEarth: false,
+  subSolarLat: 0,
   subSolarLon: 0,
 };
+
+// Reusable world position vector for the subsolar point (-R_e on +X-toward-Sun
+// world axis). Created once to avoid per-frame allocation.
+const _subSolarWorld = new THREE.Vector3();
 
 // ─── Earth texture (canvas — drawn once) ──────────────────────────────────
 const earthCanvas = createEarthCanvas();
@@ -386,10 +391,16 @@ function update(realDtSec) {
   earthMesh.rotation.y = earthRotationAt(state.time);
   scene.updateMatrixWorld(true);
 
-  // Sub-solar longitude (lat is always ≈0 with our axial tilt about X axis)
-  state.subSolarLon = -((state.time - T_PEAK) * EARTH_RAD_PER_MIN) * 180 / Math.PI;
-  // normalize to [-180, 180]
-  state.subSolarLon = ((state.subSolarLon + 540) % 360) - 180;
+  // Subsolar point: the place on Earth where the Sun is directly overhead.
+  // In world coordinates this is the +X side of Earth's surface pointing at
+  // the Sun (Sun is at -X, so the subsolar position is the world point
+  // (-R_e, 0, 0)). Transform to earthMesh-local to get the lat/lon, which
+  // correctly accounts for precession + axial tilt + Earth's daily rotation.
+  _subSolarWorld.set(-SCALE.earthRadius, 0, 0);
+  const ssLocal = earthMesh.worldToLocal(_subSolarWorld);
+  const ssLatLon = localToLatLon(ssLocal);
+  state.subSolarLat = ssLatLon.lat;
+  state.subSolarLon = ssLatLon.lon;
 
   // Compute current shadow
   const sg = shadowGeometry(moon.position);
@@ -455,8 +466,8 @@ function drawMap2D() {
   map2dCtx.clearRect(0, 0, w, h);
   map2dCtx.drawImage(earthCanvas, 0, 0, w, h);
 
-  // Day/night overlay (subsolar lat ≈ 0 in our setup)
-  drawNightShade(w, h, state.subSolarLon);
+  // Day/night overlay — uses subsolar (lat, lon) so precession is respected.
+  drawNightShade(w, h, state.subSolarLat, state.subSolarLon);
 
   // Penumbra region — shaded ellipse on the equirectangular map.
   // (Penumbra is a circle on the sphere; in equirectangular it appears
@@ -488,28 +499,29 @@ function drawMap2D() {
   drawMapLabels(w, h);
 }
 
-function drawNightShade(w, h, ssLon) {
-  // Night region: |lon - ssLon| > 90° (mod 360)
-  // Build a translucent mask using a per-column fill (sub-solar lat ≈ 0).
+function drawNightShade(w, h, ssLat, ssLon) {
+  // Shade based on cosine of angular distance to the subsolar point:
+  //   cos d = sin(lat)·sin(ssLat) + cos(lat)·cos(ssLat)·cos(lon − ssLon)
+  // Night when cos d < 0; twilight band for cos d ∈ (0, 0.15). Iterate in
+  // a coarse 4×4 grid for performance; the resulting blocks look fine at
+  // the simulation's panel size.
+  const ssLatR = ssLat * Math.PI / 180;
+  const ssLonR = ssLon * Math.PI / 180;
+  const sinSL = Math.sin(ssLatR), cosSL = Math.cos(ssLatR);
+  const step = 4;
   map2dCtx.save();
-  map2dCtx.fillStyle = 'rgba(4, 6, 16, 0.55)';
-  // For each pixel column, decide if it is on the night side.
-  // We do it with a few rectangles to avoid per-pixel work.
-  for (let lonStart = -180; lonStart < 180; lonStart += 5) {
-    const center = lonStart + 2.5;
-    let dLon = ((center - ssLon + 540) % 360) - 180;
-    if (Math.abs(dLon) > 90) {
-      const [x0] = lonLatToMap(w, h, lonStart, 0);
-      const [x1] = lonLatToMap(w, h, lonStart + 5, 0);
-      map2dCtx.fillRect(x0, 0, (x1 - x0) + 1, h);
-    } else if (Math.abs(dLon) > 75) {
-      // Twilight band
-      const t = (Math.abs(dLon) - 75) / 15;
-      map2dCtx.fillStyle = `rgba(4, 6, 16, ${0.55 * t})`;
-      const [x0] = lonLatToMap(w, h, lonStart, 0);
-      const [x1] = lonLatToMap(w, h, lonStart + 5, 0);
-      map2dCtx.fillRect(x0, 0, (x1 - x0) + 1, h);
-      map2dCtx.fillStyle = 'rgba(4, 6, 16, 0.55)';
+  for (let py = 0; py < h; py += step) {
+    const lat = (90 - ((py + step / 2) / h) * 180) * Math.PI / 180;
+    const sinL = Math.sin(lat), cosL = Math.cos(lat);
+    for (let px = 0; px < w; px += step) {
+      const lon = (((px + step / 2) / w) * 360 - 180) * Math.PI / 180;
+      const cosD = sinL * sinSL + cosL * cosSL * Math.cos(lon - ssLonR);
+      let alpha;
+      if (cosD < 0)        alpha = 0.55;
+      else if (cosD < 0.15) alpha = 0.55 * (1 - cosD / 0.15);
+      else                 continue;
+      map2dCtx.fillStyle = `rgba(4, 6, 16, ${alpha})`;
+      map2dCtx.fillRect(px, py, step + 1, step + 1);
     }
   }
   map2dCtx.restore();
