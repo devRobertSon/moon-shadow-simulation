@@ -285,9 +285,15 @@ function shadowGeometry(moonPos) {
     const umbraAtHit = SCALE.moonRadius - dMoonHit * tanBeta;
     if (umbraAtHit > 0) umbraOnEarth = true;
   } else {
-    // Shadow center misses Earth — use the closest point projected onto
-    // Earth's limb so the partial-eclipse marker still has a position.
-    hit = closest.clone().normalize().multiplyScalar(SCALE.earthRadius);
+    // Umbra cone misses Earth but penumbra may still touch the surface.
+    // We project the *Moon* radially onto Earth's surface instead of the
+    // closest-approach foot of the Sun→Moon ray. The latter lies on the
+    // YZ plane (the terminator) and is essentially fixed in inertial
+    // space; Earth's rotation then drags the displayed marker WESTWARD
+    // in geographic coordinates, reversing the natural west→east motion
+    // seen during totality. Projecting the Moon itself keeps the dot
+    // moving in the Moon's prograde direction.
+    hit = moonPos.clone().normalize().multiplyScalar(SCALE.earthRadius);
     dMoonHit = moonPos.distanceTo(hit);
   }
   // Penumbra/umbra radii evaluated at the hit point distance
