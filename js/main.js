@@ -218,8 +218,12 @@ window.addEventListener('resize', resizeAll);
 
 // ─── Kinematics ───────────────────────────────────────────────────────────
 function moonPositionAt(t) {
-  // Moon orbit in the ecliptic plane (XZ); φ = π at mid-eclipse → Moon at -X
-  const phi = Math.PI + (t - T_PEAK) * MOON_RAD_PER_MIN;
+  // Moon orbits in the ecliptic plane (XZ), prograde — same direction as
+  // Earth's rotation. With Sun at -X and Earth's rotation positive about +Y
+  // (eastward), "east of subsolar" is the +Z direction, so the Moon must
+  // move toward +Z just after peak alignment. That requires φ to *decrease*
+  // with time around the value π (where the Moon is between Sun and Earth).
+  const phi = Math.PI - (t - T_PEAK) * MOON_RAD_PER_MIN;
   return new THREE.Vector3(
     Math.cos(phi) * SCALE.moonDistance,
     0,
