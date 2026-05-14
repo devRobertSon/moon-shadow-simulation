@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>일식 시뮬레이션 — Solar Eclipse Simulation</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>🌑 일식 시뮬레이션</h1>
+    <div class="legend">
+      <span><i class="dot total"></i> 개기일식 경로 (Umbra)</span>
+      <span><i class="dot partial"></i> 부분일식 영역 (Penumbra)</span>
+      <span><i class="dot night"></i> 야간 (Night)</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel panel-3d">
+      <div class="panel-title">태양 — 달 — 지구 위치 관계</div>
+      <div id="view-3d" class="view"></div>
+      <div class="panel-hint">마우스로 회전 · 휠로 확대/축소</div>
+    </section>
+
+    <section class="panel panel-earth">
+      <div class="panel-title">지구 확대 — 위경도 그림자 추적</div>
+      <div id="view-earth" class="view"></div>
+      <div class="panel-hint" id="latlon-readout">현재 개기일식 중심: —</div>
+    </section>
+  </main>
+
+  <footer class="controls">
+    <button id="btn-play" class="btn">⏸ 일시정지</button>
+    <button id="btn-reset" class="btn">⟲ 처음으로</button>
+
+    <label class="control-group">
+      <span>시간</span>
+      <input type="range" id="time-slider" min="0" max="360" step="0.5" value="0" />
+      <span class="time-readout" id="time-readout">00:00</span>
+    </label>
+
+    <label class="control-group">
+      <span>속도</span>
+      <select id="speed-select">
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="5">5×</option>
+        <option value="10">10×</option>
+      </select>
+    </label>
+
+    <div class="phase" id="phase-readout">단계: —</div>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
