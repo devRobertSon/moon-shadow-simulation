@@ -12,7 +12,8 @@ const SCALE = {
   sunDistance: 2475,       // Sun position on -X axis
   moonDistance: 108,       // Moon orbital radius around Earth
 };
-const DEFAULT_AXIAL_TILT_DEG = 23.5; // user-adjustable via UI
+const AXIAL_TILT_DEG = 23.5; // fixed; only the *direction* (precession) is user-adjustable
+const AXIAL_TILT_RAD = AXIAL_TILT_DEG * Math.PI / 180;
 
 const TIME_MIN = 0;
 const TIME_MAX = 360;       // simulation minutes (6 hours)
@@ -126,7 +127,7 @@ const precessionGroup = new THREE.Group();
 scene.add(precessionGroup);
 
 const earthGroup = new THREE.Group();
-earthGroup.rotation.x = DEFAULT_AXIAL_TILT_DEG * Math.PI / 180;
+earthGroup.rotation.x = AXIAL_TILT_RAD;
 precessionGroup.add(earthGroup);
 
 const earthMesh = new THREE.Mesh(
@@ -612,9 +613,6 @@ const $reset    = document.getElementById('btn-reset');
 const $tRead    = document.getElementById('time-readout');
 const $phase    = document.getElementById('phase-readout');
 const $latLon   = document.getElementById('latlon-readout');
-const $tilt       = document.getElementById('tilt-slider');
-const $tiltRead   = document.getElementById('tilt-readout');
-const $flipTilt   = document.getElementById('btn-flip-tilt');
 const $prec       = document.getElementById('precession-slider');
 const $precRead   = document.getElementById('precession-readout');
 
@@ -645,10 +643,11 @@ $speed.addEventListener('change', () => {
   state.speed = parseFloat($speed.value);
 });
 
-// ─── Axial tilt control ───────────────────────────────────────────────────
-// `input` fires repeatedly during a drag. We update earthGroup.rotation.x
-// every event for live visual feedback, but the full path precompute
-// (a ~700-sample loop) is throttled to once per animation frame.
+// ─── Precession control ───────────────────────────────────────────────────
+// Slider input fires repeatedly during a drag. We update the precession
+// group's Y rotation every event for live visual feedback, but the full
+// path precompute (a ~700-sample loop) is throttled to once per animation
+// frame.
 let _pathRecomputePending = false;
 function schedulePathRecompute() {
   if (_pathRecomputePending) return;
@@ -659,19 +658,6 @@ function schedulePathRecompute() {
   });
 }
 
-function setTiltDeg(deg) {
-  const clamped = Math.max(-45, Math.min(45, deg));
-  $tilt.value = clamped;
-  earthGroup.rotation.x = clamped * Math.PI / 180;
-  const sign = clamped > 0 ? '+' : (clamped < 0 ? '−' : '±');
-  $tiltRead.textContent = `${sign}${Math.abs(clamped).toFixed(1)}°`;
-  schedulePathRecompute();
-}
-
-$tilt.addEventListener('input', () => setTiltDeg(parseFloat($tilt.value)));
-$flipTilt.addEventListener('click', () => setTiltDeg(-parseFloat($tilt.value)));
-
-// ─── Precession control ───────────────────────────────────────────────────
 // Rotates the tilt direction around the orbital axis (world +Y).
 //   prec=0°   → axis tilts toward +Z (current default; equinox-like)
 //   prec=90°  → axis tilts toward +X (away from Sun; "winter")
