@@ -12,7 +12,8 @@ const SCALE = {
   sunDistance: 2475,       // Sun position on -X axis
   moonDistance: 108,       // Moon orbital radius around Earth
 };
-const DEFAULT_AXIAL_TILT_DEG = 23.5; // user-adjustable via UI
+const AXIAL_TILT_DEG = 23.5; // fixed; only the *direction* (precession) is user-adjustable
+const AXIAL_TILT_RAD = AXIAL_TILT_DEG * Math.PI / 180;
 
 const TIME_MIN = 0;
 const TIME_MAX = 360;       // simulation minutes (6 hours)
@@ -113,10 +114,21 @@ sunLight.position.copy(sun.position);
 scene.add(sunLight);
 scene.add(new THREE.AmbientLight(0x223355, 0.35));
 
-// Earth + axial tilt group (tilt is mutable via the UI slider).
+// Earth grouping:
+//   scene → precessionGroup (rotation around Y, world up = orbital axis)
+//          → earthGroup     (rotation around X, axial tilt magnitude)
+//          → earthMesh      (rotation around Y, daily spin)
+//
+// Precession rotates the *direction* in which the tilted axis points, while
+// keeping the tilt magnitude fixed. The Y axis here is perpendicular to the
+// ecliptic plane (XZ) and hence perpendicular to incoming sunlight (which
+// travels along +X), matching the user's "공전축" definition.
+const precessionGroup = new THREE.Group();
+scene.add(precessionGroup);
+
 const earthGroup = new THREE.Group();
-earthGroup.rotation.x = DEFAULT_AXIAL_TILT_DEG * Math.PI / 180;
-scene.add(earthGroup);
+earthGroup.rotation.x = AXIAL_TILT_RAD;
+precessionGroup.add(earthGroup);
 
 const earthMesh = new THREE.Mesh(
   new THREE.SphereGeometry(SCALE.earthRadius, 96, 64),
@@ -601,9 +613,8 @@ const $reset    = document.getElementById('btn-reset');
 const $tRead    = document.getElementById('time-readout');
 const $phase    = document.getElementById('phase-readout');
 const $latLon   = document.getElementById('latlon-readout');
-const $tilt     = document.getElementById('tilt-slider');
-const $tiltRead = document.getElementById('tilt-readout');
-const $flipTilt = document.getElementById('btn-flip-tilt');
+const $prec       = document.getElementById('precession-slider');
+const $precRead   = document.getElementById('precession-readout');
 
 $time.min = TIME_MIN; $time.max = TIME_MAX;
 
@@ -632,10 +643,11 @@ $speed.addEventListener('change', () => {
   state.speed = parseFloat($speed.value);
 });
 
-// ─── Axial tilt control ───────────────────────────────────────────────────
-// `input` fires repeatedly during a drag. We update earthGroup.rotation.x
-// every event for live visual feedback, but the full path precompute
-// (a ~700-sample loop) is throttled to once per animation frame.
+// ─── Precession control ───────────────────────────────────────────────────
+// Slider input fires repeatedly during a drag. We update the precession
+// group's Y rotation every event for live visual feedback, but the full
+// path precompute (a ~700-sample loop) is throttled to once per animation
+// frame.
 let _pathRecomputePending = false;
 function schedulePathRecompute() {
   if (_pathRecomputePending) return;
@@ -646,17 +658,20 @@ function schedulePathRecompute() {
   });
 }
 
-function setTiltDeg(deg) {
-  const clamped = Math.max(-45, Math.min(45, deg));
-  $tilt.value = clamped;
-  earthGroup.rotation.x = clamped * Math.PI / 180;
-  const sign = clamped > 0 ? '+' : (clamped < 0 ? '−' : '±');
-  $tiltRead.textContent = `${sign}${Math.abs(clamped).toFixed(1)}°`;
+// Rotates the tilt direction around the orbital axis (world +Y).
+//   prec=0°   → axis tilts toward +Z (current default; equinox-like)
+//   prec=90°  → axis tilts toward +X (away from Sun; "winter")
+//   prec=180° → axis tilts toward -Z (mirror equinox)
+//   prec=270° → axis tilts toward -X (toward Sun; "summer")
+function setPrecessionDeg(deg) {
+  // Wrap to [0, 360)
+  const wrapped = ((deg % 360) + 360) % 360;
+  $prec.value = wrapped;
+  precessionGroup.rotation.y = wrapped * Math.PI / 180;
+  $precRead.textContent = `${wrapped.toFixed(0)}°`;
   schedulePathRecompute();
 }
-
-$tilt.addEventListener('input', () => setTiltDeg(parseFloat($tilt.value)));
-$flipTilt.addEventListener('click', () => setTiltDeg(-parseFloat($tilt.value)));
+$prec.addEventListener('input', () => setPrecessionDeg(parseFloat($prec.value)));
 
 function syncTimeUI() {
   $time.value = state.time;

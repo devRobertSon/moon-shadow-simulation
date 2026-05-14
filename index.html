@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>일식 시뮬레이션 — Solar Eclipse Simulation</title>
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=4" />
   <script type="importmap">
   {
     "imports": {
@@ -64,15 +64,14 @@
     </label>
 
     <label class="control-group">
-      <span>자전축</span>
-      <input type="range" id="tilt-slider" min="-45" max="45" step="0.5" value="23.5" />
-      <span class="time-readout" id="tilt-readout">+23.5°</span>
-      <button id="btn-flip-tilt" class="btn btn-small" title="자전축 방향 반전">⇅</button>
+      <span>세차(자전축 23.5° 고정)</span>
+      <input type="range" id="precession-slider" min="0" max="360" step="1" value="0" />
+      <span class="time-readout" id="precession-readout">0°</span>
     </label>
 
     <div class="phase" id="phase-readout">단계: —</div>
   </footer>
 
-  <script type="module" src="js/main.js?v=3"></script>
+  <script type="module" src="js/main.js?v=4"></script>
 </body>
 </html>
