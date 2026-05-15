@@ -822,15 +822,17 @@ function drawSky() {
   skyCtx.textBaseline = 'top';
   skyCtx.fillText('천정 (Zenith)', w/2, 4);
 
-  // ── Diurnal paths for Sun and Moon over the whole 0..360 min window.
-  //    Each sample uses observerFrameAt(t) so Earth's rotation under the
-  //    body produces the visible arc; Moon additionally moves in its orbit.
-  const samples = 96;
-  function buildPath(targetAt /* (t) → world position */) {
+  // ── Diurnal paths for Sun and Moon.
+  //    We draw two layers per body:
+  //      (1) Faded full 24h path (T_PEAK ± 720 min) so the observer can see
+  //          where the body comes from and where it sets.
+  //      (2) Bright simulation-window overlay (TIME_MIN..TIME_MAX) so the
+  //          part of the arc that the slider actually traverses stands out.
+  function buildPath(targetAt /* (t) → world position */, tMin, tMax, nSamples) {
     const segs = [[]];
     let prevX = null;
-    for (let i = 0; i <= samples; i++) {
-      const t = TIME_MIN + (TIME_MAX - TIME_MIN) * i / samples;
+    for (let i = 0; i <= nSamples; i++) {
+      const t = tMin + (tMax - tMin) * i / nSamples;
       const f = observerFrameAt(state.observer.lat, state.observer.lon, t);
       const aa = altAz(f, targetAt(t));
       const p  = skyXY(aa.az, aa.alt, w, h, faceSouth);
@@ -846,8 +848,12 @@ function drawSky() {
     }
     return segs;
   }
-  const sunPath  = buildPath(() => sun.position);
-  const moonPath = buildPath((t) => moonPositionAt(t));
+  const FULL_MIN = T_PEAK - 720;   // 24 h centered on peak (= -540 min)
+  const FULL_MAX = T_PEAK + 720;   //                    (= 900 min)
+  const sunPathFull  = buildPath(() => sun.position,     FULL_MIN, FULL_MAX, 288);
+  const moonPathFull = buildPath((t) => moonPositionAt(t), FULL_MIN, FULL_MAX, 288);
+  const sunPathSim   = buildPath(() => sun.position,     TIME_MIN, TIME_MAX, 96);
+  const moonPathSim  = buildPath((t) => moonPositionAt(t), TIME_MIN, TIME_MAX, 96);
 
   function strokePath(segs, color, width_) {
     skyCtx.strokeStyle = color;
@@ -862,14 +868,18 @@ function drawSky() {
       skyCtx.stroke();
     });
   }
-  strokePath(sunPath,  'rgba(255, 221, 68, 0.45)', 2);
-  strokePath(moonPath, 'rgba(220, 220, 230, 0.40)', 1.5);
+  // Faded full 24h layer
+  strokePath(sunPathFull,  'rgba(255, 221, 68, 0.18)', 1.5);
+  strokePath(moonPathFull, 'rgba(220, 220, 230, 0.15)', 1.2);
+  // Bright simulation-window overlay
+  strokePath(sunPathSim,   'rgba(255, 221, 68, 0.85)', 2.5);
+  strokePath(moonPathSim,  'rgba(220, 220, 230, 0.75)', 2);
 
-  // Hour ticks along the Sun's path
-  skyCtx.fillStyle = 'rgba(255,221,68,0.7)';
+  // Hour ticks along the full Sun path (every 60 simulated minutes)
+  skyCtx.fillStyle = 'rgba(255,221,68,0.55)';
   skyCtx.font = '10px system-ui, sans-serif';
   skyCtx.textAlign = 'center'; skyCtx.textBaseline = 'middle';
-  sunPath.forEach((seg) => {
+  sunPathFull.forEach((seg) => {
     seg.forEach((p) => {
       if (Math.abs(p.t - Math.round(p.t / 60) * 60) < 2 && p.alt > 0) {
         skyCtx.beginPath(); skyCtx.arc(p.x, p.y, 2.5, 0, Math.PI*2); skyCtx.fill();
