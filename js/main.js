@@ -39,6 +39,7 @@ const state = {
   umbraOnEarth: false,
   subSolarLat: 0,
   subSolarLon: 0,
+  observer: null,           // { lat, lon } chosen by clicking the 2D map
 };
 
 // Reusable world position vector for the subsolar point (-R_e on +X-toward-Sun
@@ -217,6 +218,28 @@ map2dCanvas.style.display = 'block';
 view2d.appendChild(map2dCanvas);
 const map2dCtx = map2dCanvas.getContext('2d');
 
+// ─── Sky view (3rd panel) ────────────────────────────────────────────────
+const viewSky = document.getElementById('view-sky');
+const skyCanvas = document.createElement('canvas');
+skyCanvas.style.display = 'block';
+viewSky.appendChild(skyCanvas);
+const skyCtx = skyCanvas.getContext('2d');
+
+// Click on the 2D map → pick an observer location (lat/lon).
+map2dCanvas.addEventListener('click', (e) => {
+  const rect = map2dCanvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  const lon = ((e.clientX - rect.left) / rect.width) * 360 - 180;
+  const lat =  90 - ((e.clientY - rect.top) / rect.height) * 180;
+  state.observer = { lat, lon };
+  const skyTitle = document.getElementById('sky-title');
+  if (skyTitle) {
+    const latStr = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}`;
+    const lonStr = `${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`;
+    skyTitle.textContent = `관측 지점 하늘 — ${latStr}, ${lonStr}`;
+  }
+});
+
 // ─── Resize ───────────────────────────────────────────────────────────────
 function resizeAll() {
   const r3 = view3d.getBoundingClientRect();
@@ -233,6 +256,14 @@ function resizeAll() {
     map2dCanvas.style.width  = r2.width + 'px';
     map2dCanvas.style.height = r2.height + 'px';
     map2dCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  const rSky = viewSky.getBoundingClientRect();
+  if (rSky.width > 0 && rSky.height > 0) {
+    skyCanvas.width  = Math.floor(rSky.width * dpr);
+    skyCanvas.height = Math.floor(rSky.height * dpr);
+    skyCanvas.style.width  = rSky.width + 'px';
+    skyCanvas.style.height = rSky.height + 'px';
+    skyCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 }
 window.addEventListener('resize', resizeAll);
@@ -449,6 +480,7 @@ function update(realDtSec) {
   controls.update();
   renderer.render(scene, camera);
   drawMap2D();
+  drawSky();
   updateTextReadouts();
 }
 
@@ -497,6 +529,20 @@ function drawMap2D() {
     map2dCtx.strokeStyle = 'rgba(255,255,255,0.8)';
     map2dCtx.lineWidth = 1.5;
     map2dCtx.beginPath(); map2dCtx.arc(x, y, 8, 0, Math.PI * 2); map2dCtx.stroke();
+  }
+
+  // Observer marker (cyan crosshair)
+  if (state.observer) {
+    const [ox, oy] = lonLatToMap(w, h, state.observer.lon, state.observer.lat);
+    map2dCtx.strokeStyle = '#7fffd4';
+    map2dCtx.lineWidth = 2;
+    map2dCtx.beginPath(); map2dCtx.arc(ox, oy, 7, 0, Math.PI * 2); map2dCtx.stroke();
+    map2dCtx.beginPath();
+    map2dCtx.moveTo(ox - 12, oy); map2dCtx.lineTo(ox - 4, oy);
+    map2dCtx.moveTo(ox + 4, oy);  map2dCtx.lineTo(ox + 12, oy);
+    map2dCtx.moveTo(ox, oy - 12); map2dCtx.lineTo(ox, oy - 4);
+    map2dCtx.moveTo(ox, oy + 4);  map2dCtx.lineTo(ox, oy + 12);
+    map2dCtx.stroke();
   }
 
   // Lat/lon labels
@@ -627,7 +673,247 @@ function drawMapLabels(w, h) {
   }
 }
 
-// ─── UI ───────────────────────────────────────────────────────────────────
+// ─── Sky view (alt/az for an observer at a chosen lat/lon) ───────────────
+//
+// Computes the observer's world position and local horizontal frame
+// (east, north, up) analytically — without mutating any Three.js objects —
+// so we can also evaluate it at past/future simulation times to draw the
+// diurnal path of the Sun and Moon.
+function observerFrameAt(latDeg, lonDeg, time) {
+  const lat = latDeg * Math.PI / 180;
+  const lon = lonDeg * Math.PI / 180;
+  // earthMesh local frame: lat = asin(y/R), lon = atan2(x, z)
+  let x = SCALE.earthRadius * Math.cos(lat) * Math.sin(lon);
+  let y = SCALE.earthRadius * Math.sin(lat);
+  let z = SCALE.earthRadius * Math.cos(lat) * Math.cos(lon);
+  // Apply daily rotation R_y(day)
+  const day = earthRotationAt(time);
+  const cd = Math.cos(day), sd = Math.sin(day);
+  let x1 = cd * x + sd * z, z1 = -sd * x + cd * z;
+  // Apply axial tilt R_x(tilt)
+  const ct = Math.cos(AXIAL_TILT_RAD), st = Math.sin(AXIAL_TILT_RAD);
+  let y2 = ct * y - st * z1, z2 = st * y + ct * z1;
+  // Apply precession R_y(prec)
+  const prec = precessionGroup.rotation.y;
+  const cp = Math.cos(prec), sp = Math.sin(prec);
+  const xf = cp * x1 + sp * z2, zf = -sp * x1 + cp * z2;
+  const worldP = new THREE.Vector3(xf, y2, zf);
+  const up = worldP.clone().normalize();
+  // North pole direction in world = R_y(prec) · R_x(tilt) · (0,1,0)
+  //  R_x(tilt): (0,1,0) → (0, cos(tilt), sin(tilt))
+  //  R_y(prec): (0, cos(tilt), sin(tilt)) → (sin(prec)*sin(tilt), cos(tilt), cos(prec)*sin(tilt))
+  const spinAxis = new THREE.Vector3(
+    sp * st, ct, cp * st,
+  );
+  const east  = new THREE.Vector3().crossVectors(spinAxis, up).normalize();
+  const north = new THREE.Vector3().crossVectors(up, east).normalize();
+  return { worldP, up, east, north };
+}
+
+const _altAzDir = new THREE.Vector3();
+function altAz(frame, targetWorld) {
+  _altAzDir.subVectors(targetWorld, frame.worldP).normalize();
+  const u = THREE.MathUtils.clamp(_altAzDir.dot(frame.up), -1, 1);
+  const e = _altAzDir.dot(frame.east);
+  const n = _altAzDir.dot(frame.north);
+  const alt = Math.asin(u) * 180 / Math.PI;
+  let az = Math.atan2(e, n) * 180 / Math.PI;
+  if (az < 0) az += 360;
+  return { alt, az };
+}
+
+// Map (azimuth from north, altitude) to canvas (x, y).
+// `faceSouth` chooses which half-sky is the "front":
+//   true  → center column = south (az=180°), left=east (az=90°), right=west (az=270°)
+//   false → center column = north (az=0°),  left=east (az=90°), right=west (az=270°)
+// The decision is made by drawSky() based on whether the observer is north
+// or south of the subsolar latitude, so the Sun (and the daytime sky) is
+// always on screen even when precession puts the Sun in the observer's
+// "wrong" hemisphere (e.g. equatorial observer at boreal summer solstice
+// sees the Sun pass through the northern sky).
+function skyXY(az, alt, w, h, faceSouth) {
+  let x;
+  if (faceSouth) {
+    x = ((az - 90) / 180) * w;            // 90→0, 180→w/2, 270→w
+  } else {
+    const azN = az > 180 ? az - 360 : az; // [-180, 180]
+    x = ((90 - azN) / 180) * w;           // 90→0, 0→w/2, -90→w
+  }
+  const y = (1 - alt / 90) * h;
+  return { x, y, onScreen: x >= -2 && x <= w + 2 && alt >= -2 };
+}
+
+function drawSky() {
+  const w = skyCanvas.clientWidth;
+  const h = skyCanvas.clientHeight;
+  if (!w || !h) return;
+  skyCtx.clearRect(0, 0, w, h);
+
+  if (!state.observer) {
+    skyCtx.fillStyle = '#0a0e1e';
+    skyCtx.fillRect(0, 0, w, h);
+    skyCtx.fillStyle = '#aab0cc';
+    skyCtx.font = '14px system-ui, sans-serif';
+    skyCtx.textAlign = 'center';
+    skyCtx.textBaseline = 'middle';
+    skyCtx.fillText('지구 확대 지도에서 한 지점을 클릭하면', w / 2, h / 2 - 12);
+    skyCtx.fillText('그 곳에서의 하늘 (태양·달 위치, 부분일식)이 표시됩니다', w / 2, h / 2 + 12);
+    return;
+  }
+
+  // Current observer frame
+  const frame = observerFrameAt(state.observer.lat, state.observer.lon, state.time);
+  const sunAA = altAz(frame, sun.position);
+
+  // Choose which half-sky is the "front":
+  //   observer north of subsolar → Sun is in the south sky → face south
+  //   observer south of subsolar → Sun is in the north sky → face north
+  // This handles the case where precession puts the subsolar point in the
+  // observer's own hemisphere (e.g. equator observer at boreal solstice).
+  const faceSouth = state.observer.lat > state.subSolarLat;
+
+  // Background gradient — day/twilight/night based on Sun altitude
+  const isDay = sunAA.alt > -2;
+  const grad = skyCtx.createLinearGradient(0, 0, 0, h);
+  if (sunAA.alt > 10)          { grad.addColorStop(0, '#1a4d8f'); grad.addColorStop(1, '#a7c9eb'); }
+  else if (sunAA.alt > 0)      { grad.addColorStop(0, '#1a2c5e'); grad.addColorStop(1, '#d39a52'); }
+  else if (sunAA.alt > -8)     { grad.addColorStop(0, '#0d1438'); grad.addColorStop(1, '#523064'); }
+  else                          { grad.addColorStop(0, '#03050d'); grad.addColorStop(1, '#0a1228'); }
+  skyCtx.fillStyle = grad;
+  skyCtx.fillRect(0, 0, w, h);
+
+  // Ground below horizon
+  const horizonY = h * 1.0; // horizon = bottom edge (alt 0)
+  skyCtx.fillStyle = '#1a1b22';
+  skyCtx.fillRect(0, horizonY, w, h);
+
+  // Altitude grid lines
+  skyCtx.strokeStyle = 'rgba(255,255,255,0.08)';
+  skyCtx.lineWidth = 1;
+  for (let a = 30; a < 90; a += 30) {
+    const y = (1 - a / 90) * h;
+    skyCtx.beginPath(); skyCtx.moveTo(0, y); skyCtx.lineTo(w, y); skyCtx.stroke();
+  }
+  // Vertical meridian (looking-direction center)
+  skyCtx.beginPath(); skyCtx.moveTo(w/2, 0); skyCtx.lineTo(w/2, h); skyCtx.stroke();
+
+  // Cardinal labels
+  skyCtx.fillStyle = 'rgba(255,255,255,0.7)';
+  skyCtx.font = '12px system-ui, sans-serif';
+  skyCtx.textBaseline = 'bottom';
+  skyCtx.textAlign = 'left';   skyCtx.fillText('E (동)', 6, h - 4);
+  skyCtx.textAlign = 'right';  skyCtx.fillText('W (서)', w - 6, h - 4);
+  skyCtx.textAlign = 'center'; skyCtx.fillText(faceSouth ? 'S (남)' : 'N (북)', w/2, h - 4);
+  skyCtx.textBaseline = 'top';
+  skyCtx.fillText('천정 (Zenith)', w/2, 4);
+
+  // ── Diurnal paths for Sun and Moon over the whole 0..360 min window.
+  //    Each sample uses observerFrameAt(t) so Earth's rotation under the
+  //    body produces the visible arc; Moon additionally moves in its orbit.
+  const samples = 96;
+  function buildPath(targetAt /* (t) → world position */) {
+    const segs = [[]];
+    let prevX = null;
+    for (let i = 0; i <= samples; i++) {
+      const t = TIME_MIN + (TIME_MAX - TIME_MIN) * i / samples;
+      const f = observerFrameAt(state.observer.lat, state.observer.lon, t);
+      const aa = altAz(f, targetAt(t));
+      const p  = skyXY(aa.az, aa.alt, w, h, faceSouth);
+      // Skip points behind the observer (off the strip) or far below horizon
+      if (p.x < -10 || p.x > w + 10 || aa.alt < -10) {
+        if (segs[segs.length - 1].length) segs.push([]);
+        prevX = null; continue;
+      }
+      // Break the line if it jumps across the azimuth seam
+      if (prevX !== null && Math.abs(p.x - prevX) > w * 0.5) segs.push([]);
+      segs[segs.length - 1].push({ x: p.x, y: p.y, t, alt: aa.alt });
+      prevX = p.x;
+    }
+    return segs;
+  }
+  const sunPath  = buildPath(() => sun.position);
+  const moonPath = buildPath((t) => moonPositionAt(t));
+
+  function strokePath(segs, color, width_) {
+    skyCtx.strokeStyle = color;
+    skyCtx.lineWidth = width_;
+    segs.forEach((seg) => {
+      if (seg.length < 2) return;
+      skyCtx.beginPath();
+      seg.forEach((p, i) => {
+        if (i === 0) skyCtx.moveTo(p.x, p.y);
+        else         skyCtx.lineTo(p.x, p.y);
+      });
+      skyCtx.stroke();
+    });
+  }
+  strokePath(sunPath,  'rgba(255, 221, 68, 0.45)', 2);
+  strokePath(moonPath, 'rgba(220, 220, 230, 0.40)', 1.5);
+
+  // Hour ticks along the Sun's path
+  skyCtx.fillStyle = 'rgba(255,221,68,0.7)';
+  skyCtx.font = '10px system-ui, sans-serif';
+  skyCtx.textAlign = 'center'; skyCtx.textBaseline = 'middle';
+  sunPath.forEach((seg) => {
+    seg.forEach((p) => {
+      if (Math.abs(p.t - Math.round(p.t / 60) * 60) < 2 && p.alt > 0) {
+        skyCtx.beginPath(); skyCtx.arc(p.x, p.y, 2.5, 0, Math.PI*2); skyCtx.fill();
+      }
+    });
+  });
+
+  // Current Sun and Moon
+  const moonAA = altAz(frame, moon.position);
+  const sunPx = skyXY(sunAA.az, sunAA.alt, w, h, faceSouth);
+  const moonPx = skyXY(moonAA.az, moonAA.alt, w, h, faceSouth);
+
+  // Sun and Moon angular radii (degrees) — both ~1.15° by design
+  const sunAngR = Math.atan2(SCALE.sunRadius, frame.worldP.distanceTo(sun.position)) * 180 / Math.PI;
+  const moonAngR = Math.atan2(SCALE.moonRadius, frame.worldP.distanceTo(moon.position)) * 180 / Math.PI;
+  // Pixel scale: 1° of altitude → h/90 pixels. Use same scale horizontally.
+  const pxPerDeg = h / 90;
+  const sunPxR = Math.max(8, sunAngR * pxPerDeg * 6); // exaggerate for visibility
+  const moonPxR = Math.max(8, moonAngR * pxPerDeg * 6);
+
+  // Draw Sun
+  if (sunPx.onScreen) {
+    skyCtx.fillStyle = '#ffdd44';
+    skyCtx.shadowBlur = 24;
+    skyCtx.shadowColor = '#ffaa30';
+    skyCtx.beginPath(); skyCtx.arc(sunPx.x, sunPx.y, sunPxR, 0, Math.PI*2); skyCtx.fill();
+    skyCtx.shadowBlur = 0;
+    // Draw Moon overlapping the Sun if Moon is between observer and Sun.
+    // We use the angular separation between Moon and Sun as seen from observer.
+    if (moonPx.onScreen) {
+      const dx = moonPx.x - sunPx.x, dy = moonPx.y - sunPx.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < sunPxR + moonPxR) {
+        // Moon disc partially or fully covering Sun
+        skyCtx.fillStyle = '#0a0a14';
+        skyCtx.beginPath(); skyCtx.arc(moonPx.x, moonPx.y, moonPxR, 0, Math.PI*2); skyCtx.fill();
+        // Sun's bright crescent: ring outline highlight
+        skyCtx.strokeStyle = '#ffe680';
+        skyCtx.lineWidth = 1.5;
+        skyCtx.beginPath(); skyCtx.arc(sunPx.x, sunPx.y, sunPxR, 0, Math.PI*2); skyCtx.stroke();
+      }
+    }
+  }
+  // Draw Moon (when not occulting Sun, e.g., night)
+  if (moonPx.onScreen && (!sunPx.onScreen || Math.hypot(moonPx.x-sunPx.x, moonPx.y-sunPx.y) >= sunPxR + moonPxR)) {
+    skyCtx.fillStyle = '#c8c8d6';
+    skyCtx.beginPath(); skyCtx.arc(moonPx.x, moonPx.y, moonPxR, 0, Math.PI*2); skyCtx.fill();
+  }
+
+  // Readout: Sun alt/az
+  skyCtx.fillStyle = 'rgba(255,255,255,0.85)';
+  skyCtx.textAlign = 'left';
+  skyCtx.textBaseline = 'top';
+  skyCtx.font = '11px system-ui, sans-serif';
+  skyCtx.fillText(`태양 고도 ${sunAA.alt.toFixed(1)}°  방위 ${sunAA.az.toFixed(0)}°`, 6, 4);
+  skyCtx.fillText(`달 고도 ${moonAA.alt.toFixed(1)}°  방위 ${moonAA.az.toFixed(0)}°`, 6, 20);
+  skyCtx.fillText(`관측자가 바라보는 방향: ${faceSouth ? '남(South)' : '북(North)'}` +
+                  ` · subsolar 위도 ${state.subSolarLat.toFixed(1)}°`, 6, 36);
+}
 const $time     = document.getElementById('time-slider');
 const $speed    = document.getElementById('speed-select');
 const $play     = document.getElementById('btn-play');

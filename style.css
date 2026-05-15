@@ -57,13 +57,28 @@ body {
   flex: 1;
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  grid-template-areas:
+    "scene earth"
+    "sky   sky";
   gap: 1px;
   background: #1c2240;
   min-height: 0;
 }
 
+.panel-3d    { grid-area: scene; }
+.panel-earth { grid-area: earth; }
+.panel-sky   { grid-area: sky; }
+
 @media (max-width: 900px) {
-  .layout { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    grid-template-areas:
+      "scene"
+      "earth"
+      "sky";
+  }
 }
 
 .panel {
