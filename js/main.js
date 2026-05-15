@@ -822,15 +822,17 @@ function drawSky() {
   skyCtx.textBaseline = 'top';
   skyCtx.fillText('천정 (Zenith)', w/2, 4);
 
-  // ── Diurnal paths for Sun and Moon over the whole 0..360 min window.
-  //    Each sample uses observerFrameAt(t) so Earth's rotation under the
-  //    body produces the visible arc; Moon additionally moves in its orbit.
-  const samples = 96;
-  function buildPath(targetAt /* (t) → world position */) {
+  // ── Diurnal paths for Sun and Moon.
+  //    We draw two layers per body:
+  //      (1) Faded full 24h path (T_PEAK ± 720 min) so the observer can see
+  //          where the body comes from and where it sets.
+  //      (2) Bright simulation-window overlay (TIME_MIN..TIME_MAX) so the
+  //          part of the arc that the slider actually traverses stands out.
+  function buildPath(targetAt /* (t) → world position */, tMin, tMax, nSamples) {
     const segs = [[]];
     let prevX = null;
-    for (let i = 0; i <= samples; i++) {
-      const t = TIME_MIN + (TIME_MAX - TIME_MIN) * i / samples;
+    for (let i = 0; i <= nSamples; i++) {
+      const t = tMin + (tMax - tMin) * i / nSamples;
       const f = observerFrameAt(state.observer.lat, state.observer.lon, t);
       const aa = altAz(f, targetAt(t));
       const p  = skyXY(aa.az, aa.alt, w, h, faceSouth);
@@ -846,8 +848,12 @@ function drawSky() {
     }
     return segs;
   }
-  const sunPath  = buildPath(() => sun.position);
-  const moonPath = buildPath((t) => moonPositionAt(t));
+  const FULL_MIN = T_PEAK - 720;   // 24 h centered on peak (= -540 min)
+  const FULL_MAX = T_PEAK + 720;   //                    (= 900 min)
+  const sunPathFull  = buildPath(() => sun.position,     FULL_MIN, FULL_MAX, 288);
+  const moonPathFull = buildPath((t) => moonPositionAt(t), FULL_MIN, FULL_MAX, 288);
+  const sunPathSim   = buildPath(() => sun.position,     TIME_MIN, TIME_MAX, 96);
+  const moonPathSim  = buildPath((t) => moonPositionAt(t), TIME_MIN, TIME_MAX, 96);
 
   function strokePath(segs, color, width_) {
     skyCtx.strokeStyle = color;
@@ -862,14 +868,18 @@ function drawSky() {
       skyCtx.stroke();
     });
   }
-  strokePath(sunPath,  'rgba(255, 221, 68, 0.45)', 2);
-  strokePath(moonPath, 'rgba(220, 220, 230, 0.40)', 1.5);
+  // Faded full 24h layer
+  strokePath(sunPathFull,  'rgba(255, 221, 68, 0.18)', 1.5);
+  strokePath(moonPathFull, 'rgba(220, 220, 230, 0.15)', 1.2);
+  // Bright simulation-window overlay
+  strokePath(sunPathSim,   'rgba(255, 221, 68, 0.85)', 2.5);
+  strokePath(moonPathSim,  'rgba(220, 220, 230, 0.75)', 2);
 
-  // Hour ticks along the Sun's path
-  skyCtx.fillStyle = 'rgba(255,221,68,0.7)';
+  // Hour ticks along the full Sun path (every 60 simulated minutes)
+  skyCtx.fillStyle = 'rgba(255,221,68,0.55)';
   skyCtx.font = '10px system-ui, sans-serif';
   skyCtx.textAlign = 'center'; skyCtx.textBaseline = 'middle';
-  sunPath.forEach((seg) => {
+  sunPathFull.forEach((seg) => {
     seg.forEach((p) => {
       if (Math.abs(p.t - Math.round(p.t / 60) * 60) < 2 && p.alt > 0) {
         skyCtx.beginPath(); skyCtx.arc(p.x, p.y, 2.5, 0, Math.PI*2); skyCtx.fill();
@@ -928,6 +938,102 @@ function drawSky() {
   skyCtx.fillText(`달 고도 ${moonAA.alt.toFixed(1)}°  방위 ${moonAA.az.toFixed(0)}°`, 6, 20);
   skyCtx.fillText(`관측자가 바라보는 방향: ${faceSouth ? '남(South)' : '북(North)'}` +
                   ` · subsolar 위도 ${state.subSolarLat.toFixed(1)}°`, 6, 36);
+
+  drawSunDiscInset(frame, w, h);
+}
+
+// Inset (top-right corner) showing the Sun magnified with the Moon overlaid
+// at its true angular offset in CELESTIAL coordinates (N up, E left looking
+// at the Sun). This is the view that makes the parallax direction visible:
+// observers north of the umbra path see the Moon cover the SOUTH part of
+// the Sun, observers south see it cover the NORTH part. The horizon-based
+// chart on its own can hide that distinction (Moon ends up "below" the Sun
+// in both hemispheres because the celestial-N direction is on opposite
+// sides of the observer's zenith).
+function drawSunDiscInset(frame, w, h) {
+  const sunDir  = new THREE.Vector3().subVectors(sun.position,  frame.worldP).normalize();
+  const moonDir = new THREE.Vector3().subVectors(moon.position, frame.worldP).normalize();
+
+  // Celestial up = spin axis direction in world, projected perpendicular to
+  // the Sun viewing direction.
+  const prec = precessionGroup.rotation.y;
+  const spin = new THREE.Vector3(
+    Math.sin(prec) * Math.sin(AXIAL_TILT_RAD),
+    Math.cos(AXIAL_TILT_RAD),
+    Math.cos(prec) * Math.sin(AXIAL_TILT_RAD),
+  );
+  const cU = spin.clone().sub(sunDir.clone().multiplyScalar(spin.dot(sunDir))).normalize();
+  // Celestial east in the sun's image plane (right-handed: sunDir × cU
+  // points roughly westward, so we negate to get east-on-the-left)
+  const cE = new THREE.Vector3().crossVectors(cU, sunDir).normalize();
+
+  // Moon offset relative to Sun, decomposed onto (cU, cE)
+  const mO = moonDir.clone().sub(sunDir.clone().multiplyScalar(moonDir.dot(sunDir)));
+  const dN = mO.dot(cU);    // toward celestial north (positive)
+  const dE = mO.dot(cE);    // toward celestial east  (positive)
+
+  const sunDist  = frame.worldP.distanceTo(sun.position);
+  const moonDist = frame.worldP.distanceTo(moon.position);
+  const sunAngR  = Math.atan2(SCALE.sunRadius,  sunDist);
+  const moonAngR = Math.atan2(SCALE.moonRadius, moonDist);
+
+  // Inset geometry — square in bottom-right
+  const boxSize = Math.min(160, Math.min(w, h) * 0.35);
+  const margin  = 10;
+  const cx = w - margin - boxSize / 2;
+  const cy = h - margin - boxSize / 2;
+  const rSun  = boxSize * 0.32;
+  const rMoon = rSun * (moonAngR / sunAngR);
+
+  // Background
+  skyCtx.fillStyle   = 'rgba(8, 10, 22, 0.92)';
+  skyCtx.strokeStyle = 'rgba(150, 170, 220, 0.45)';
+  skyCtx.lineWidth   = 1;
+  skyCtx.fillRect(cx - boxSize/2, cy - boxSize/2, boxSize, boxSize);
+  skyCtx.strokeRect(cx - boxSize/2, cy - boxSize/2, boxSize, boxSize);
+
+  // Sun disc
+  skyCtx.fillStyle = '#ffdd44';
+  skyCtx.shadowBlur = 18; skyCtx.shadowColor = '#ffaa30';
+  skyCtx.beginPath(); skyCtx.arc(cx, cy, rSun, 0, Math.PI*2); skyCtx.fill();
+  skyCtx.shadowBlur = 0;
+
+  // Moon disc: position from offsets (angular → pixels via sun's angular
+  // radius mapping to rSun). dN positive = up on screen (so subtract from
+  // cy); dE positive = celestial east → drawn to the LEFT (cardinal east
+  // on a sky chart is typically left when looking at the Sun overhead).
+  const pxPerRad = rSun / sunAngR;
+  const mx = cx - dE * pxPerRad;
+  const my = cy - dN * pxPerRad;
+  skyCtx.fillStyle = '#0a0a14';
+  skyCtx.beginPath(); skyCtx.arc(mx, my, rMoon, 0, Math.PI*2); skyCtx.fill();
+  // Outline of Sun for contrast where Moon overlaps
+  skyCtx.strokeStyle = 'rgba(255, 230, 128, 0.7)';
+  skyCtx.lineWidth = 1;
+  skyCtx.beginPath(); skyCtx.arc(cx, cy, rSun, 0, Math.PI*2); skyCtx.stroke();
+
+  // Cardinal labels (celestial)
+  skyCtx.fillStyle = '#aab0cc';
+  skyCtx.font = '10px system-ui, sans-serif';
+  skyCtx.textAlign = 'center'; skyCtx.textBaseline = 'middle';
+  skyCtx.fillText('N',  cx,                  cy - boxSize/2 + 9);
+  skyCtx.fillText('S',  cx,                  cy + boxSize/2 - 9);
+  skyCtx.fillText('E',  cx - boxSize/2 + 9,  cy);
+  skyCtx.fillText('W',  cx + boxSize/2 - 9,  cy);
+  skyCtx.textAlign = 'right'; skyCtx.textBaseline = 'top';
+  skyCtx.fillText('태양 확대 (천구 방위)', cx + boxSize/2 - 4, cy - boxSize/2 + 4);
+
+  // Eclipse magnitude readout
+  const sep = Math.hypot(dN, dE);                 // angular separation (rad)
+  const sumR  = sunAngR + moonAngR;
+  let mag = 0;
+  if (sep < sumR) {
+    if (sep + moonAngR <= sunAngR) mag = 1;
+    else mag = (sunAngR + moonAngR - sep) / (2 * sunAngR);
+  }
+  const pctStr = (mag * 100).toFixed(0);
+  skyCtx.textAlign = 'left'; skyCtx.textBaseline = 'bottom';
+  skyCtx.fillText(`가림 ${pctStr}%`, cx - boxSize/2 + 4, cy + boxSize/2 - 4);
 }
 const $time     = document.getElementById('time-slider');
 const $speed    = document.getElementById('speed-select');
