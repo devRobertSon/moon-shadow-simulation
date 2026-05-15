@@ -723,18 +723,24 @@ function altAz(frame, targetWorld) {
 }
 
 // Map (azimuth from north, altitude) to canvas (x, y).
-// N hem: center column = south (az=180), x increases east→west reversed so left=east.
-// S hem: center column = north (az=0), still left=east.
-function skyXY(az, alt, w, h, lat) {
+// `faceSouth` chooses which half-sky is the "front":
+//   true  → center column = south (az=180°), left=east (az=90°), right=west (az=270°)
+//   false → center column = north (az=0°),  left=east (az=90°), right=west (az=270°)
+// The decision is made by drawSky() based on whether the observer is north
+// or south of the subsolar latitude, so the Sun (and the daytime sky) is
+// always on screen even when precession puts the Sun in the observer's
+// "wrong" hemisphere (e.g. equatorial observer at boreal summer solstice
+// sees the Sun pass through the northern sky).
+function skyXY(az, alt, w, h, faceSouth) {
   let x;
-  if (lat >= 0) {
-    x = ((az - 90) / 180) * w; // az 90→x=0, 180→w/2, 270→w
+  if (faceSouth) {
+    x = ((az - 90) / 180) * w;            // 90→0, 180→w/2, 270→w
   } else {
     const azN = az > 180 ? az - 360 : az; // [-180, 180]
     x = ((90 - azN) / 180) * w;           // 90→0, 0→w/2, -90→w
   }
   const y = (1 - alt / 90) * h;
-  return { x, y, onScreen: x >= 0 && x <= w && alt >= -2 };
+  return { x, y, onScreen: x >= -2 && x <= w + 2 && alt >= -2 };
 }
 
 function drawSky() {
@@ -758,6 +764,13 @@ function drawSky() {
   // Current observer frame
   const frame = observerFrameAt(state.observer.lat, state.observer.lon, state.time);
   const sunAA = altAz(frame, sun.position);
+
+  // Choose which half-sky is the "front":
+  //   observer north of subsolar → Sun is in the south sky → face south
+  //   observer south of subsolar → Sun is in the north sky → face north
+  // This handles the case where precession puts the subsolar point in the
+  // observer's own hemisphere (e.g. equator observer at boreal solstice).
+  const faceSouth = state.observer.lat > state.subSolarLat;
 
   // Background gradient — day/twilight/night based on Sun altitude
   const isDay = sunAA.alt > -2;
@@ -790,7 +803,7 @@ function drawSky() {
   skyCtx.textBaseline = 'bottom';
   skyCtx.textAlign = 'left';   skyCtx.fillText('E (동)', 6, h - 4);
   skyCtx.textAlign = 'right';  skyCtx.fillText('W (서)', w - 6, h - 4);
-  skyCtx.textAlign = 'center'; skyCtx.fillText(state.observer.lat >= 0 ? 'S (남)' : 'N (북)', w/2, h - 4);
+  skyCtx.textAlign = 'center'; skyCtx.fillText(faceSouth ? 'S (남)' : 'N (북)', w/2, h - 4);
   skyCtx.textBaseline = 'top';
   skyCtx.fillText('천정 (Zenith)', w/2, 4);
 
@@ -805,7 +818,7 @@ function drawSky() {
       const t = TIME_MIN + (TIME_MAX - TIME_MIN) * i / samples;
       const f = observerFrameAt(state.observer.lat, state.observer.lon, t);
       const aa = altAz(f, targetAt(t));
-      const p  = skyXY(aa.az, aa.alt, w, h, state.observer.lat);
+      const p  = skyXY(aa.az, aa.alt, w, h, faceSouth);
       // Skip points behind the observer (off the strip) or far below horizon
       if (p.x < -10 || p.x > w + 10 || aa.alt < -10) {
         if (segs[segs.length - 1].length) segs.push([]);
@@ -851,8 +864,8 @@ function drawSky() {
 
   // Current Sun and Moon
   const moonAA = altAz(frame, moon.position);
-  const sunPx = skyXY(sunAA.az, sunAA.alt, w, h, state.observer.lat);
-  const moonPx = skyXY(moonAA.az, moonAA.alt, w, h, state.observer.lat);
+  const sunPx = skyXY(sunAA.az, sunAA.alt, w, h, faceSouth);
+  const moonPx = skyXY(moonAA.az, moonAA.alt, w, h, faceSouth);
 
   // Sun and Moon angular radii (degrees) — both ~1.15° by design
   const sunAngR = Math.atan2(SCALE.sunRadius, frame.worldP.distanceTo(sun.position)) * 180 / Math.PI;
@@ -898,6 +911,8 @@ function drawSky() {
   skyCtx.font = '11px system-ui, sans-serif';
   skyCtx.fillText(`태양 고도 ${sunAA.alt.toFixed(1)}°  방위 ${sunAA.az.toFixed(0)}°`, 6, 4);
   skyCtx.fillText(`달 고도 ${moonAA.alt.toFixed(1)}°  방위 ${moonAA.az.toFixed(0)}°`, 6, 20);
+  skyCtx.fillText(`관측자가 바라보는 방향: ${faceSouth ? '남(South)' : '북(North)'}` +
+                  ` · subsolar 위도 ${state.subSolarLat.toFixed(1)}°`, 6, 36);
 }
 const $time     = document.getElementById('time-slider');
 const $speed    = document.getElementById('speed-select');
