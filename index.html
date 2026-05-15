@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>일식 시뮬레이션 — Solar Eclipse Simulation</title>
-  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="style.css?v=9" />
   <script type="importmap">
   {
     "imports": {
@@ -35,9 +35,15 @@
     </section>
 
     <section class="panel panel-earth">
-      <div class="panel-title">지구 확대 — 위경도 그림자 추적</div>
+      <div class="panel-title">지구 확대 — 위경도 그림자 추적 · 클릭하여 관측 지점 선택</div>
       <div id="view-earth" class="view"></div>
       <div class="panel-hint" id="latlon-readout">현재 개기일식 중심: —</div>
+    </section>
+
+    <section class="panel panel-sky">
+      <div class="panel-title" id="sky-title">관측 지점 하늘 — 지도에서 위치를 클릭하세요</div>
+      <div id="view-sky" class="view"></div>
+      <div class="panel-hint" id="sky-hint">태양/달의 일주 경로 · 부분일식 시 가림 비율 표시</div>
     </section>
   </main>
 
@@ -76,6 +82,6 @@
     <div class="phase" id="phase-readout">단계: —</div>
   </footer>
 
-  <script type="module" src="js/main.js?v=8"></script>
+  <script type="module" src="js/main.js?v=9"></script>
 </body>
 </html>
