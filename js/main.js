@@ -737,30 +737,24 @@ function altAz(frame, targetWorld) {
   return { alt, az };
 }
 
-// Map (azimuth from north, altitude) to canvas (x, y).
-// `faceSouth` chooses which half-sky is the "front":
-//   true  → center column = south (az=180°), left=east (az=90°), right=west (az=270°)
-//   false → center column = north (az=0°),  left=east (az=90°), right=west (az=270°)
-// We use a UNIFORM pixel-per-degree scale (the smaller of w/180, h/90) so
-// that 1° of altitude and 1° of azimuth map to the same screen distance.
-// Without this, on a wide panel a 1° east-west gap appears much larger
-// than a 1° altitude gap, distorting the visual separation between Sun
-// and Moon and making the partial-eclipse overlap inconsistent with the
-// celestial-coordinate inset.
-function skyXY(az, alt, w, h, faceSouth) {
-  const pxPerDeg = Math.min(w / 180, h / 90);
-  const chartW   = 180 * pxPerDeg;
-  const xLeft    = (w - chartW) / 2;
-  let angOff;
-  if (faceSouth) {
-    angOff = az - 180;                        // east -90, south 0, west +90
-  } else {
-    const azN = az > 180 ? az - 360 : az;     // [-180, 180]
-    angOff = -azN;                            // east (-90) ← →  west (+90)
-  }
-  const x = xLeft + (angOff + 90) * pxPerDeg;
-  const y = h - alt * pxPerDeg;
-  return { x, y, onScreen: angOff >= -95 && angOff <= 95 && alt >= -2 };
+// Zenith-centered azimuthal equidistant projection of the sky dome:
+//   • Zenith (alt=90°)  →  center of canvas
+//   • Horizon (alt=0°)  →  circle of radius (panel/2)
+//   • Azimuth 0° (N)    →  up
+//   • Azimuth 90° (E)   →  left      (per user request: E left, W right)
+//   • Azimuth 180° (S)  →  down
+//   • Azimuth 270° (W)  →  right
+// This is the natural "lying on your back, looking up" view of the dome.
+// In a small neighborhood, screen distance ≈ true angular distance × pxPerDeg,
+// so disc separation faithfully reflects the celestial angular separation
+// (no cos(alt) distortion the way an alt-az grid has).
+function skyXY(az, alt, w, h /*, faceSouth (unused) */) {
+  const pxPerDeg = Math.min(w, h) / 2 / 90;
+  const r = (90 - alt) * pxPerDeg;
+  const a = az * Math.PI / 180;
+  const x = w / 2 - Math.sin(a) * r;   // E (az=90) → left; W (az=270) → right
+  const y = h / 2 - Math.cos(a) * r;   // N (az=0)  → up;   S (az=180) → down
+  return { x, y, onScreen: alt >= -2 };
 }
 
 function drawSky() {
@@ -785,55 +779,52 @@ function drawSky() {
   const frame = observerFrameAt(state.observer.lat, state.observer.lon, state.time);
   const sunAA = altAz(frame, sun.position);
 
-  // Choose which half-sky is the "front":
-  //   observer north of subsolar → Sun is in the south sky → face south
-  //   observer south of subsolar → Sun is in the north sky → face north
-  // This handles the case where precession puts the subsolar point in the
-  // observer's own hemisphere (e.g. equator observer at boreal solstice).
-  const faceSouth = state.observer.lat > state.subSolarLat;
+  // Sky dome bounds: zenith at canvas center, horizon at the inscribed
+  // circle of radius min(w,h)/2.
+  const pxPerDeg = Math.min(w, h) / 2 / 90;
+  const cx = w / 2, cy = h / 2;
+  const rHorizon = 90 * pxPerDeg;
 
-  // Background gradient — day/twilight/night based on Sun altitude
-  const isDay = sunAA.alt > -2;
-  const grad = skyCtx.createLinearGradient(0, 0, 0, h);
-  if (sunAA.alt > 10)          { grad.addColorStop(0, '#1a4d8f'); grad.addColorStop(1, '#a7c9eb'); }
-  else if (sunAA.alt > 0)      { grad.addColorStop(0, '#1a2c5e'); grad.addColorStop(1, '#d39a52'); }
-  else if (sunAA.alt > -8)     { grad.addColorStop(0, '#0d1438'); grad.addColorStop(1, '#523064'); }
-  else                          { grad.addColorStop(0, '#03050d'); grad.addColorStop(1, '#0a1228'); }
-  skyCtx.fillStyle = grad;
+  // Background: paint whole panel dark, then fill the dome disc with a
+  // day/twilight/night colour based on the Sun's altitude.
+  skyCtx.fillStyle = '#05060c';
   skyCtx.fillRect(0, 0, w, h);
 
-  // Ground below horizon
-  const horizonY = h * 1.0; // horizon = bottom edge (alt 0)
-  skyCtx.fillStyle = '#1a1b22';
-  skyCtx.fillRect(0, horizonY, w, h);
+  skyCtx.save();
+  skyCtx.beginPath(); skyCtx.arc(cx, cy, rHorizon, 0, Math.PI * 2); skyCtx.clip();
+  let domeFill = '#03050d';
+  if (sunAA.alt > 10)      domeFill = '#1a4d8f';
+  else if (sunAA.alt > 0)  domeFill = '#1a2c5e';
+  else if (sunAA.alt > -8) domeFill = '#0d1438';
+  skyCtx.fillStyle = domeFill;
+  skyCtx.fillRect(0, 0, w, h);
+  skyCtx.restore();
 
-  // Chart bounds (must match skyXY)
-  const pxPerDeg = Math.min(w / 180, h / 90);
-  const chartW   = 180 * pxPerDeg;
-  const chartH   = 90 * pxPerDeg;
-  const xLeft    = (w - chartW) / 2;
-  const xRight   = xLeft + chartW;
-  const yTop     = h - chartH;
-
-  // Altitude grid lines
-  skyCtx.strokeStyle = 'rgba(255,255,255,0.08)';
+  // Altitude grid: concentric circles at alt = 0°, 30°, 60°
+  skyCtx.strokeStyle = 'rgba(255,255,255,0.15)';
   skyCtx.lineWidth = 1;
-  for (let a = 30; a < 90; a += 30) {
-    const yLine = h - a * pxPerDeg;
-    skyCtx.beginPath(); skyCtx.moveTo(xLeft, yLine); skyCtx.lineTo(xRight, yLine); skyCtx.stroke();
+  for (const a of [0, 30, 60]) {
+    const r = (90 - a) * pxPerDeg;
+    skyCtx.beginPath(); skyCtx.arc(cx, cy, r, 0, Math.PI * 2); skyCtx.stroke();
   }
-  // Vertical meridian (looking-direction center)
-  skyCtx.beginPath(); skyCtx.moveTo(w/2, yTop); skyCtx.lineTo(w/2, h); skyCtx.stroke();
+  // Cardinal cross-hairs through zenith (N-S vertical, E-W horizontal)
+  skyCtx.strokeStyle = 'rgba(255,255,255,0.08)';
+  skyCtx.beginPath();
+  skyCtx.moveTo(cx, cy - rHorizon); skyCtx.lineTo(cx, cy + rHorizon);
+  skyCtx.moveTo(cx - rHorizon, cy); skyCtx.lineTo(cx + rHorizon, cy);
+  skyCtx.stroke();
 
-  // Cardinal labels
-  skyCtx.fillStyle = 'rgba(255,255,255,0.7)';
-  skyCtx.font = '12px system-ui, sans-serif';
-  skyCtx.textBaseline = 'bottom';
-  skyCtx.textAlign = 'left';   skyCtx.fillText('E (동)', xLeft + 6, h - 4);
-  skyCtx.textAlign = 'right';  skyCtx.fillText('W (서)', xRight - 6, h - 4);
-  skyCtx.textAlign = 'center'; skyCtx.fillText(faceSouth ? 'S (남)' : 'N (북)', w/2, h - 4);
-  skyCtx.textBaseline = 'top';
-  skyCtx.fillText('천정 (Zenith)', w/2, yTop + 4);
+  // Cardinal labels at horizon edges
+  skyCtx.fillStyle = 'rgba(255,255,255,0.85)';
+  skyCtx.font = '13px system-ui, sans-serif';
+  skyCtx.textAlign = 'center'; skyCtx.textBaseline = 'middle';
+  skyCtx.fillText('N (북)', cx,                cy - rHorizon - 12);
+  skyCtx.fillText('S (남)', cx,                cy + rHorizon + 12);
+  skyCtx.fillText('E (동)', cx - rHorizon - 18, cy);
+  skyCtx.fillText('W (서)', cx + rHorizon + 18, cy);
+  skyCtx.fillStyle = 'rgba(255,255,255,0.4)';
+  skyCtx.font = '10px system-ui, sans-serif';
+  skyCtx.fillText('천정 (Zenith)', cx, cy - 10);
 
   // ── Diurnal paths for Sun and Moon.
   //    We draw two layers per body:
@@ -848,7 +839,7 @@ function drawSky() {
       const t = tMin + (tMax - tMin) * i / nSamples;
       const f = observerFrameAt(state.observer.lat, state.observer.lon, t);
       const aa = altAz(f, targetAt(t));
-      const p  = skyXY(aa.az, aa.alt, w, h, faceSouth);
+      const p  = skyXY(aa.az, aa.alt, w, h);
       // Skip points behind the observer (off the strip) or far below horizon
       if (p.x < -10 || p.x > w + 10 || aa.alt < -10) {
         if (segs[segs.length - 1].length) segs.push([]);
@@ -900,29 +891,13 @@ function drawSky() {
     });
   });
 
-  // Current Sun and Moon
+  // Current Sun and Moon — both go through the same zenith-centered
+  // projection. The projection is locally angle-preserving near a given
+  // point, so the Sun-Moon screen separation already matches the true
+  // celestial angular separation (no cos(alt) correction needed).
   const moonAA = altAz(frame, moon.position);
-  const sunPx = skyXY(sunAA.az, sunAA.alt, w, h, faceSouth);
-  // Moon position: draw at the *true angular* offset from the Sun, not at
-  // its raw (alt, az) screen coordinates. In alt-az, 1° of azimuth covers
-  // only cos(alt) of true angular distance, so a high-altitude Sun and
-  // Moon separated by a few degrees of azimuth look much farther apart on
-  // an alt-az grid than they are on the sky. Anchoring the Moon to the
-  // Sun in true angular space keeps the disc separation consistent with
-  // the inset's gima(%) readout — so as soon as the inset shows any
-  // coverage, the discs visibly overlap in the main chart too.
-  const midAltRad = (sunAA.alt + moonAA.alt) * 0.5 * Math.PI / 180;
-  const dAlt = moonAA.alt - sunAA.alt;
-  let   dAzRaw = moonAA.az - sunAA.az;
-  dAzRaw = ((dAzRaw + 540) % 360) - 180;       // normalize to [-180, 180]
-  const dAzAng = dAzRaw * Math.cos(midAltRad); // shrink azimuth gap by cos(alt)
-  const xSign = faceSouth ? 1 : -1;            // chart x increases with az
-                                               // (face south) or with -az (face north)
-  const moonPx = {
-    x: sunPx.x + xSign * dAzAng * pxPerDeg,
-    y: sunPx.y - dAlt * pxPerDeg,
-    onScreen: sunPx.onScreen,
-  };
+  const sunPx  = skyXY(sunAA.az,  sunAA.alt,  w, h);
+  const moonPx = skyXY(moonAA.az, moonAA.alt, w, h);
 
   // Sun and Moon angular radii (degrees) — both ~1.15° by design
   const sunAngR = Math.atan2(SCALE.sunRadius, frame.worldP.distanceTo(sun.position)) * 180 / Math.PI;
@@ -970,8 +945,7 @@ function drawSky() {
   skyCtx.font = '11px system-ui, sans-serif';
   skyCtx.fillText(`태양 고도 ${sunAA.alt.toFixed(1)}°  방위 ${sunAA.az.toFixed(0)}°`, 6, 4);
   skyCtx.fillText(`달 고도 ${moonAA.alt.toFixed(1)}°  방위 ${moonAA.az.toFixed(0)}°`, 6, 20);
-  skyCtx.fillText(`관측자가 바라보는 방향: ${faceSouth ? '남(South)' : '북(North)'}` +
-                  ` · subsolar 위도 ${state.subSolarLat.toFixed(1)}°`, 6, 36);
+  skyCtx.fillText(`subsolar 위도 ${state.subSolarLat.toFixed(1)}°  ·  zenith 중앙, N 위 / S 아래 / E 왼쪽 / W 오른쪽`, 6, 36);
 
   drawSunDiscInset(frame, w, h);
 }
