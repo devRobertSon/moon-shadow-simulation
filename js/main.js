@@ -895,10 +895,16 @@ function drawSky() {
   // Sun and Moon angular radii (degrees) — both ~1.15° by design
   const sunAngR = Math.atan2(SCALE.sunRadius, frame.worldP.distanceTo(sun.position)) * 180 / Math.PI;
   const moonAngR = Math.atan2(SCALE.moonRadius, frame.worldP.distanceTo(moon.position)) * 180 / Math.PI;
-  // Pixel scale: 1° of altitude → h/90 pixels. Use same scale horizontally.
+  // Pixel scale: 1° of altitude → h/90 pixels. We draw discs at *true*
+  // angular size (no magnification) so that the visual gap between Sun and
+  // Moon faithfully reflects whether the observer is inside or outside the
+  // penumbra. Earlier we used a 6× magnification, which made the discs
+  // overlap even when the parallax offset put the Moon well outside the
+  // Sun. The inset (bottom-right) provides a zoomed view of the disc for
+  // eclipse-magnitude detail.
   const pxPerDeg = h / 90;
-  const sunPxR = Math.max(8, sunAngR * pxPerDeg * 6); // exaggerate for visibility
-  const moonPxR = Math.max(8, moonAngR * pxPerDeg * 6);
+  const sunPxR  = Math.max(3, sunAngR * pxPerDeg);
+  const moonPxR = Math.max(3, moonAngR * pxPerDeg);
 
   // Draw Sun
   if (sunPx.onScreen) {
@@ -1002,12 +1008,20 @@ function drawSunDiscInset(frame, w, h) {
   // radius mapping to rSun). dN positive = up on screen (so subtract from
   // cy); dE positive = celestial east → drawn to the LEFT (cardinal east
   // on a sky chart is typically left when looking at the Sun overhead).
+  // The Moon disc is *clipped* to the Sun's disc so that only the occluded
+  // portion is rendered — when there is no overlap (no eclipse at this
+  // location), nothing is drawn over the Sun.
   const pxPerRad = rSun / sunAngR;
   const mx = cx - dE * pxPerRad;
   const my = cy - dN * pxPerRad;
+  skyCtx.save();
+  skyCtx.beginPath();
+  skyCtx.arc(cx, cy, rSun, 0, Math.PI*2);
+  skyCtx.clip();
   skyCtx.fillStyle = '#0a0a14';
   skyCtx.beginPath(); skyCtx.arc(mx, my, rMoon, 0, Math.PI*2); skyCtx.fill();
-  // Outline of Sun for contrast where Moon overlaps
+  skyCtx.restore();
+  // Outline of Sun for clarity
   skyCtx.strokeStyle = 'rgba(255, 230, 128, 0.7)';
   skyCtx.lineWidth = 1;
   skyCtx.beginPath(); skyCtx.arc(cx, cy, rSun, 0, Math.PI*2); skyCtx.stroke();
