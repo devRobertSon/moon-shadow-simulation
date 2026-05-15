@@ -903,7 +903,26 @@ function drawSky() {
   // Current Sun and Moon
   const moonAA = altAz(frame, moon.position);
   const sunPx = skyXY(sunAA.az, sunAA.alt, w, h, faceSouth);
-  const moonPx = skyXY(moonAA.az, moonAA.alt, w, h, faceSouth);
+  // Moon position: draw at the *true angular* offset from the Sun, not at
+  // its raw (alt, az) screen coordinates. In alt-az, 1° of azimuth covers
+  // only cos(alt) of true angular distance, so a high-altitude Sun and
+  // Moon separated by a few degrees of azimuth look much farther apart on
+  // an alt-az grid than they are on the sky. Anchoring the Moon to the
+  // Sun in true angular space keeps the disc separation consistent with
+  // the inset's gima(%) readout — so as soon as the inset shows any
+  // coverage, the discs visibly overlap in the main chart too.
+  const midAltRad = (sunAA.alt + moonAA.alt) * 0.5 * Math.PI / 180;
+  const dAlt = moonAA.alt - sunAA.alt;
+  let   dAzRaw = moonAA.az - sunAA.az;
+  dAzRaw = ((dAzRaw + 540) % 360) - 180;       // normalize to [-180, 180]
+  const dAzAng = dAzRaw * Math.cos(midAltRad); // shrink azimuth gap by cos(alt)
+  const xSign = faceSouth ? 1 : -1;            // chart x increases with az
+                                               // (face south) or with -az (face north)
+  const moonPx = {
+    x: sunPx.x + xSign * dAzAng * pxPerDeg,
+    y: sunPx.y - dAlt * pxPerDeg,
+    onScreen: sunPx.onScreen,
+  };
 
   // Sun and Moon angular radii (degrees) — both ~1.15° by design
   const sunAngR = Math.atan2(SCALE.sunRadius, frame.worldP.distanceTo(sun.position)) * 180 / Math.PI;
