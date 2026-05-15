@@ -748,8 +748,11 @@ function altAz(frame, targetWorld) {
 // In a small neighborhood, screen distance ≈ true angular distance × pxPerDeg,
 // so disc separation faithfully reflects the celestial angular separation
 // (no cos(alt) distortion the way an alt-az grid has).
+// Margin reserved around the dome for cardinal labels (N/S/E/W)
+const SKY_LABEL_MARGIN = 24;
+
 function skyXY(az, alt, w, h /*, faceSouth (unused) */) {
-  const pxPerDeg = Math.min(w, h) / 2 / 90;
+  const pxPerDeg = (Math.min(w, h) / 2 - SKY_LABEL_MARGIN) / 90;
   const r = (90 - alt) * pxPerDeg;
   const a = az * Math.PI / 180;
   const x = w / 2 - Math.sin(a) * r;   // E (az=90) → left; W (az=270) → right
@@ -780,8 +783,10 @@ function drawSky() {
   const sunAA = altAz(frame, sun.position);
 
   // Sky dome bounds: zenith at canvas center, horizon at the inscribed
-  // circle of radius min(w,h)/2.
-  const pxPerDeg = Math.min(w, h) / 2 / 90;
+  // circle of radius (min(w,h)/2 − SKY_LABEL_MARGIN). The margin leaves
+  // room outside the dome for the N/S/E/W cardinal labels so they aren't
+  // clipped at the canvas edge.
+  const pxPerDeg = (Math.min(w, h) / 2 - SKY_LABEL_MARGIN) / 90;
   const cx = w / 2, cy = h / 2;
   const rHorizon = 90 * pxPerDeg;
 
