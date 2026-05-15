@@ -39,6 +39,7 @@ const state = {
   umbraOnEarth: false,
   subSolarLat: 0,
   subSolarLon: 0,
+  observer: null,           // { lat, lon } chosen by clicking the 2D map
 };
 
 // Reusable world position vector for the subsolar point (-R_e on +X-toward-Sun
@@ -216,6 +217,21 @@ const map2dCanvas = document.createElement('canvas');
 map2dCanvas.style.display = 'block';
 view2d.appendChild(map2dCanvas);
 const map2dCtx = map2dCanvas.getContext('2d');
+
+// Click on the 2D map → pick an observer location (lat/lon).
+map2dCanvas.addEventListener('click', (e) => {
+  const rect = map2dCanvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  const lon = ((e.clientX - rect.left) / rect.width) * 360 - 180;
+  const lat =  90 - ((e.clientY - rect.top) / rect.height) * 180;
+  state.observer = { lat, lon };
+  const skyTitle = document.getElementById('sky-title');
+  if (skyTitle) {
+    const latStr = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}`;
+    const lonStr = `${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`;
+    skyTitle.textContent = `관측 지점 하늘 — ${latStr}, ${lonStr}`;
+  }
+});
 
 // ─── Resize ───────────────────────────────────────────────────────────────
 function resizeAll() {
@@ -497,6 +513,20 @@ function drawMap2D() {
     map2dCtx.strokeStyle = 'rgba(255,255,255,0.8)';
     map2dCtx.lineWidth = 1.5;
     map2dCtx.beginPath(); map2dCtx.arc(x, y, 8, 0, Math.PI * 2); map2dCtx.stroke();
+  }
+
+  // Observer marker (cyan crosshair)
+  if (state.observer) {
+    const [ox, oy] = lonLatToMap(w, h, state.observer.lon, state.observer.lat);
+    map2dCtx.strokeStyle = '#7fffd4';
+    map2dCtx.lineWidth = 2;
+    map2dCtx.beginPath(); map2dCtx.arc(ox, oy, 7, 0, Math.PI * 2); map2dCtx.stroke();
+    map2dCtx.beginPath();
+    map2dCtx.moveTo(ox - 12, oy); map2dCtx.lineTo(ox - 4, oy);
+    map2dCtx.moveTo(ox + 4, oy);  map2dCtx.lineTo(ox + 12, oy);
+    map2dCtx.moveTo(ox, oy - 12); map2dCtx.lineTo(ox, oy - 4);
+    map2dCtx.moveTo(ox, oy + 4);  map2dCtx.lineTo(ox, oy + 12);
+    map2dCtx.stroke();
   }
 
   // Lat/lon labels
