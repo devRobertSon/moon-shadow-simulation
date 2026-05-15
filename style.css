@@ -119,6 +119,18 @@ body {
   width: 100%;
   height: 100%;
   min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Force any canvas inserted into a view (Three.js renderer canvas or our 2D
+   canvases) to fill its container. Without this rule the Three.js canvas
+   keeps the pixel size from the first setSize() call and overflows the
+   panel on smaller viewports. */
+.view canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .controls {
