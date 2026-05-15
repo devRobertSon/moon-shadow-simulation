@@ -244,7 +244,10 @@ map2dCanvas.addEventListener('click', (e) => {
 function resizeAll() {
   const r3 = view3d.getBoundingClientRect();
   if (r3.width > 0 && r3.height > 0) {
-    renderer.setSize(r3.width, r3.height, false);
+    // Pass `true` (default) so Three.js also updates the canvas CSS size,
+    // not just its pixel buffer. Combined with the `.view canvas` CSS rule
+    // this keeps the renderer's canvas snapped to the panel on mobile.
+    renderer.setSize(r3.width, r3.height);
     camera.aspect = r3.width / r3.height;
     camera.updateProjectionMatrix();
   }
@@ -267,6 +270,18 @@ function resizeAll() {
   }
 }
 window.addEventListener('resize', resizeAll);
+window.addEventListener('orientationchange', () => {
+  // Mobile address-bar collapse/expand fires resize but with stale rects,
+  // so re-check a few times after the orientation change settles.
+  setTimeout(resizeAll, 100);
+  setTimeout(resizeAll, 400);
+});
+// Re-measure after the first paint in case the panels weren't fully laid
+// out when boot ran (common on mobile when the address bar is animating).
+window.addEventListener('load', () => {
+  requestAnimationFrame(resizeAll);
+  setTimeout(resizeAll, 300);
+});
 
 // ─── Kinematics ───────────────────────────────────────────────────────────
 function moonPositionAt(t) {
