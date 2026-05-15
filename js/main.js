@@ -938,6 +938,102 @@ function drawSky() {
   skyCtx.fillText(`달 고도 ${moonAA.alt.toFixed(1)}°  방위 ${moonAA.az.toFixed(0)}°`, 6, 20);
   skyCtx.fillText(`관측자가 바라보는 방향: ${faceSouth ? '남(South)' : '북(North)'}` +
                   ` · subsolar 위도 ${state.subSolarLat.toFixed(1)}°`, 6, 36);
+
+  drawSunDiscInset(frame, w, h);
+}
+
+// Inset (top-right corner) showing the Sun magnified with the Moon overlaid
+// at its true angular offset in CELESTIAL coordinates (N up, E left looking
+// at the Sun). This is the view that makes the parallax direction visible:
+// observers north of the umbra path see the Moon cover the SOUTH part of
+// the Sun, observers south see it cover the NORTH part. The horizon-based
+// chart on its own can hide that distinction (Moon ends up "below" the Sun
+// in both hemispheres because the celestial-N direction is on opposite
+// sides of the observer's zenith).
+function drawSunDiscInset(frame, w, h) {
+  const sunDir  = new THREE.Vector3().subVectors(sun.position,  frame.worldP).normalize();
+  const moonDir = new THREE.Vector3().subVectors(moon.position, frame.worldP).normalize();
+
+  // Celestial up = spin axis direction in world, projected perpendicular to
+  // the Sun viewing direction.
+  const prec = precessionGroup.rotation.y;
+  const spin = new THREE.Vector3(
+    Math.sin(prec) * Math.sin(AXIAL_TILT_RAD),
+    Math.cos(AXIAL_TILT_RAD),
+    Math.cos(prec) * Math.sin(AXIAL_TILT_RAD),
+  );
+  const cU = spin.clone().sub(sunDir.clone().multiplyScalar(spin.dot(sunDir))).normalize();
+  // Celestial east in the sun's image plane (right-handed: sunDir × cU
+  // points roughly westward, so we negate to get east-on-the-left)
+  const cE = new THREE.Vector3().crossVectors(cU, sunDir).normalize();
+
+  // Moon offset relative to Sun, decomposed onto (cU, cE)
+  const mO = moonDir.clone().sub(sunDir.clone().multiplyScalar(moonDir.dot(sunDir)));
+  const dN = mO.dot(cU);    // toward celestial north (positive)
+  const dE = mO.dot(cE);    // toward celestial east  (positive)
+
+  const sunDist  = frame.worldP.distanceTo(sun.position);
+  const moonDist = frame.worldP.distanceTo(moon.position);
+  const sunAngR  = Math.atan2(SCALE.sunRadius,  sunDist);
+  const moonAngR = Math.atan2(SCALE.moonRadius, moonDist);
+
+  // Inset geometry — square in bottom-right
+  const boxSize = Math.min(160, Math.min(w, h) * 0.35);
+  const margin  = 10;
+  const cx = w - margin - boxSize / 2;
+  const cy = h - margin - boxSize / 2;
+  const rSun  = boxSize * 0.32;
+  const rMoon = rSun * (moonAngR / sunAngR);
+
+  // Background
+  skyCtx.fillStyle   = 'rgba(8, 10, 22, 0.92)';
+  skyCtx.strokeStyle = 'rgba(150, 170, 220, 0.45)';
+  skyCtx.lineWidth   = 1;
+  skyCtx.fillRect(cx - boxSize/2, cy - boxSize/2, boxSize, boxSize);
+  skyCtx.strokeRect(cx - boxSize/2, cy - boxSize/2, boxSize, boxSize);
+
+  // Sun disc
+  skyCtx.fillStyle = '#ffdd44';
+  skyCtx.shadowBlur = 18; skyCtx.shadowColor = '#ffaa30';
+  skyCtx.beginPath(); skyCtx.arc(cx, cy, rSun, 0, Math.PI*2); skyCtx.fill();
+  skyCtx.shadowBlur = 0;
+
+  // Moon disc: position from offsets (angular → pixels via sun's angular
+  // radius mapping to rSun). dN positive = up on screen (so subtract from
+  // cy); dE positive = celestial east → drawn to the LEFT (cardinal east
+  // on a sky chart is typically left when looking at the Sun overhead).
+  const pxPerRad = rSun / sunAngR;
+  const mx = cx - dE * pxPerRad;
+  const my = cy - dN * pxPerRad;
+  skyCtx.fillStyle = '#0a0a14';
+  skyCtx.beginPath(); skyCtx.arc(mx, my, rMoon, 0, Math.PI*2); skyCtx.fill();
+  // Outline of Sun for contrast where Moon overlaps
+  skyCtx.strokeStyle = 'rgba(255, 230, 128, 0.7)';
+  skyCtx.lineWidth = 1;
+  skyCtx.beginPath(); skyCtx.arc(cx, cy, rSun, 0, Math.PI*2); skyCtx.stroke();
+
+  // Cardinal labels (celestial)
+  skyCtx.fillStyle = '#aab0cc';
+  skyCtx.font = '10px system-ui, sans-serif';
+  skyCtx.textAlign = 'center'; skyCtx.textBaseline = 'middle';
+  skyCtx.fillText('N',  cx,                  cy - boxSize/2 + 9);
+  skyCtx.fillText('S',  cx,                  cy + boxSize/2 - 9);
+  skyCtx.fillText('E',  cx - boxSize/2 + 9,  cy);
+  skyCtx.fillText('W',  cx + boxSize/2 - 9,  cy);
+  skyCtx.textAlign = 'right'; skyCtx.textBaseline = 'top';
+  skyCtx.fillText('태양 확대 (천구 방위)', cx + boxSize/2 - 4, cy - boxSize/2 + 4);
+
+  // Eclipse magnitude readout
+  const sep = Math.hypot(dN, dE);                 // angular separation (rad)
+  const sumR  = sunAngR + moonAngR;
+  let mag = 0;
+  if (sep < sumR) {
+    if (sep + moonAngR <= sunAngR) mag = 1;
+    else mag = (sunAngR + moonAngR - sep) / (2 * sunAngR);
+  }
+  const pctStr = (mag * 100).toFixed(0);
+  skyCtx.textAlign = 'left'; skyCtx.textBaseline = 'bottom';
+  skyCtx.fillText(`가림 ${pctStr}%`, cx - boxSize/2 + 4, cy + boxSize/2 - 4);
 }
 const $time     = document.getElementById('time-slider');
 const $speed    = document.getElementById('speed-select');
