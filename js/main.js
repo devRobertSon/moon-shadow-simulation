@@ -741,21 +741,26 @@ function altAz(frame, targetWorld) {
 // `faceSouth` chooses which half-sky is the "front":
 //   true  → center column = south (az=180°), left=east (az=90°), right=west (az=270°)
 //   false → center column = north (az=0°),  left=east (az=90°), right=west (az=270°)
-// The decision is made by drawSky() based on whether the observer is north
-// or south of the subsolar latitude, so the Sun (and the daytime sky) is
-// always on screen even when precession puts the Sun in the observer's
-// "wrong" hemisphere (e.g. equatorial observer at boreal summer solstice
-// sees the Sun pass through the northern sky).
+// We use a UNIFORM pixel-per-degree scale (the smaller of w/180, h/90) so
+// that 1° of altitude and 1° of azimuth map to the same screen distance.
+// Without this, on a wide panel a 1° east-west gap appears much larger
+// than a 1° altitude gap, distorting the visual separation between Sun
+// and Moon and making the partial-eclipse overlap inconsistent with the
+// celestial-coordinate inset.
 function skyXY(az, alt, w, h, faceSouth) {
-  let x;
+  const pxPerDeg = Math.min(w / 180, h / 90);
+  const chartW   = 180 * pxPerDeg;
+  const xLeft    = (w - chartW) / 2;
+  let angOff;
   if (faceSouth) {
-    x = ((az - 90) / 180) * w;            // 90→0, 180→w/2, 270→w
+    angOff = az - 180;                        // east -90, south 0, west +90
   } else {
-    const azN = az > 180 ? az - 360 : az; // [-180, 180]
-    x = ((90 - azN) / 180) * w;           // 90→0, 0→w/2, -90→w
+    const azN = az > 180 ? az - 360 : az;     // [-180, 180]
+    angOff = -azN;                            // east (-90) ← →  west (+90)
   }
-  const y = (1 - alt / 90) * h;
-  return { x, y, onScreen: x >= -2 && x <= w + 2 && alt >= -2 };
+  const x = xLeft + (angOff + 90) * pxPerDeg;
+  const y = h - alt * pxPerDeg;
+  return { x, y, onScreen: angOff >= -95 && angOff <= 95 && alt >= -2 };
 }
 
 function drawSky() {
@@ -802,25 +807,33 @@ function drawSky() {
   skyCtx.fillStyle = '#1a1b22';
   skyCtx.fillRect(0, horizonY, w, h);
 
+  // Chart bounds (must match skyXY)
+  const pxPerDeg = Math.min(w / 180, h / 90);
+  const chartW   = 180 * pxPerDeg;
+  const chartH   = 90 * pxPerDeg;
+  const xLeft    = (w - chartW) / 2;
+  const xRight   = xLeft + chartW;
+  const yTop     = h - chartH;
+
   // Altitude grid lines
   skyCtx.strokeStyle = 'rgba(255,255,255,0.08)';
   skyCtx.lineWidth = 1;
   for (let a = 30; a < 90; a += 30) {
-    const y = (1 - a / 90) * h;
-    skyCtx.beginPath(); skyCtx.moveTo(0, y); skyCtx.lineTo(w, y); skyCtx.stroke();
+    const yLine = h - a * pxPerDeg;
+    skyCtx.beginPath(); skyCtx.moveTo(xLeft, yLine); skyCtx.lineTo(xRight, yLine); skyCtx.stroke();
   }
   // Vertical meridian (looking-direction center)
-  skyCtx.beginPath(); skyCtx.moveTo(w/2, 0); skyCtx.lineTo(w/2, h); skyCtx.stroke();
+  skyCtx.beginPath(); skyCtx.moveTo(w/2, yTop); skyCtx.lineTo(w/2, h); skyCtx.stroke();
 
   // Cardinal labels
   skyCtx.fillStyle = 'rgba(255,255,255,0.7)';
   skyCtx.font = '12px system-ui, sans-serif';
   skyCtx.textBaseline = 'bottom';
-  skyCtx.textAlign = 'left';   skyCtx.fillText('E (동)', 6, h - 4);
-  skyCtx.textAlign = 'right';  skyCtx.fillText('W (서)', w - 6, h - 4);
+  skyCtx.textAlign = 'left';   skyCtx.fillText('E (동)', xLeft + 6, h - 4);
+  skyCtx.textAlign = 'right';  skyCtx.fillText('W (서)', xRight - 6, h - 4);
   skyCtx.textAlign = 'center'; skyCtx.fillText(faceSouth ? 'S (남)' : 'N (북)', w/2, h - 4);
   skyCtx.textBaseline = 'top';
-  skyCtx.fillText('천정 (Zenith)', w/2, 4);
+  skyCtx.fillText('천정 (Zenith)', w/2, yTop + 4);
 
   // ── Diurnal paths for Sun and Moon.
   //    We draw two layers per body:
@@ -895,14 +908,10 @@ function drawSky() {
   // Sun and Moon angular radii (degrees) — both ~1.15° by design
   const sunAngR = Math.atan2(SCALE.sunRadius, frame.worldP.distanceTo(sun.position)) * 180 / Math.PI;
   const moonAngR = Math.atan2(SCALE.moonRadius, frame.worldP.distanceTo(moon.position)) * 180 / Math.PI;
-  // Pixel scale: 1° of altitude → h/90 pixels. We draw discs at *true*
-  // angular size (no magnification) so that the visual gap between Sun and
-  // Moon faithfully reflects whether the observer is inside or outside the
-  // penumbra. Earlier we used a 6× magnification, which made the discs
-  // overlap even when the parallax offset put the Moon well outside the
-  // Sun. The inset (bottom-right) provides a zoomed view of the disc for
-  // eclipse-magnitude detail.
-  const pxPerDeg = h / 90;
+  // Pixel scale: same uniform value used by skyXY/grid, so disc sizes are
+  // consistent with the angular separation rendered on the chart. The Sun
+  // and Moon are drawn at TRUE angular size; the inset (bottom-right) is
+  // the zoomed view for eclipse-magnitude detail.
   const sunPxR  = Math.max(3, sunAngR * pxPerDeg);
   const moonPxR = Math.max(3, moonAngR * pxPerDeg);
 
@@ -1054,7 +1063,6 @@ const $speed    = document.getElementById('speed-select');
 const $play     = document.getElementById('btn-play');
 const $reset    = document.getElementById('btn-reset');
 const $tRead    = document.getElementById('time-readout');
-const $phase    = document.getElementById('phase-readout');
 const $latLon   = document.getElementById('latlon-readout');
 const $prec       = document.getElementById('precession-slider');
 const $precRead   = document.getElementById('precession-readout');
@@ -1134,7 +1142,6 @@ function syncTimeUI() {
 }
 
 function updateTextReadouts() {
-  $phase.textContent = `단계: ${state.phase}`;
   if (state.currentLatLon) {
     const { lat, lon } = state.currentLatLon;
     const latStr = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}`;
