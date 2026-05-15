@@ -794,6 +794,61 @@ function drawSky() {
   skyCtx.textBaseline = 'top';
   skyCtx.fillText('천정 (Zenith)', w/2, 4);
 
+  // ── Diurnal paths for Sun and Moon over the whole 0..360 min window.
+  //    Each sample uses observerFrameAt(t) so Earth's rotation under the
+  //    body produces the visible arc; Moon additionally moves in its orbit.
+  const samples = 96;
+  function buildPath(targetAt /* (t) → world position */) {
+    const segs = [[]];
+    let prevX = null;
+    for (let i = 0; i <= samples; i++) {
+      const t = TIME_MIN + (TIME_MAX - TIME_MIN) * i / samples;
+      const f = observerFrameAt(state.observer.lat, state.observer.lon, t);
+      const aa = altAz(f, targetAt(t));
+      const p  = skyXY(aa.az, aa.alt, w, h, state.observer.lat);
+      // Skip points behind the observer (off the strip) or far below horizon
+      if (p.x < -10 || p.x > w + 10 || aa.alt < -10) {
+        if (segs[segs.length - 1].length) segs.push([]);
+        prevX = null; continue;
+      }
+      // Break the line if it jumps across the azimuth seam
+      if (prevX !== null && Math.abs(p.x - prevX) > w * 0.5) segs.push([]);
+      segs[segs.length - 1].push({ x: p.x, y: p.y, t, alt: aa.alt });
+      prevX = p.x;
+    }
+    return segs;
+  }
+  const sunPath  = buildPath(() => sun.position);
+  const moonPath = buildPath((t) => moonPositionAt(t));
+
+  function strokePath(segs, color, width_) {
+    skyCtx.strokeStyle = color;
+    skyCtx.lineWidth = width_;
+    segs.forEach((seg) => {
+      if (seg.length < 2) return;
+      skyCtx.beginPath();
+      seg.forEach((p, i) => {
+        if (i === 0) skyCtx.moveTo(p.x, p.y);
+        else         skyCtx.lineTo(p.x, p.y);
+      });
+      skyCtx.stroke();
+    });
+  }
+  strokePath(sunPath,  'rgba(255, 221, 68, 0.45)', 2);
+  strokePath(moonPath, 'rgba(220, 220, 230, 0.40)', 1.5);
+
+  // Hour ticks along the Sun's path
+  skyCtx.fillStyle = 'rgba(255,221,68,0.7)';
+  skyCtx.font = '10px system-ui, sans-serif';
+  skyCtx.textAlign = 'center'; skyCtx.textBaseline = 'middle';
+  sunPath.forEach((seg) => {
+    seg.forEach((p) => {
+      if (Math.abs(p.t - Math.round(p.t / 60) * 60) < 2 && p.alt > 0) {
+        skyCtx.beginPath(); skyCtx.arc(p.x, p.y, 2.5, 0, Math.PI*2); skyCtx.fill();
+      }
+    });
+  });
+
   // Current Sun and Moon
   const moonAA = altAz(frame, moon.position);
   const sunPx = skyXY(sunAA.az, sunAA.alt, w, h, state.observer.lat);
